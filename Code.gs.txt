@@ -25,7 +25,7 @@ var HEADERS_TH = ['เลขที่ใบรายการ', 'DC', 'ชื่
 var TEXT_COLS = 9;
 var NCOLS = FIELDS.length;
 var MAX_ROWS_PER_POST = 5000;
-var DEFAULT_SETTINGS = { kpi: 10, warnBuffer: 1.5 };
+var DEFAULT_SETTINGS = { kpi: 10, warnBuffer: 1.5, gA: 8, gB: 10, gC: 12, gD: 14, gE: 16 };
 var CK = 'nim-inbound';
 
 function json_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
@@ -145,7 +145,7 @@ function doPost(e) {
     }
     if (b.a === 'settings') {
       var s = readSettings_(), inp = b.settings || {};
-      ['kpi', 'warnBuffer'].forEach(function (k) { var v = Number(inp[k]); if (isFinite(v) && v >= 0) s[k] = v; });
+      ['kpi', 'warnBuffer', 'gA', 'gB', 'gC', 'gD', 'gE'].forEach(function (k) { var v = Number(inp[k]); if (isFinite(v) && v >= 0) s[k] = v; });
       writeSettings_(s); log_('settings', JSON.stringify(s)); cacheClear_();
       return json_({ ok: true, settings: s });
     }

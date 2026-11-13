@@ -46,7 +46,7 @@ async function start() {
   let j;
   try { bootMsg('<p>กำลังโหลดข้อมูล…</p>'); j = await (await fetch(window.NIM_API)).json(); }
   catch (e) { bootMsg('<h1>โหลดข้อมูลไม่สำเร็จ</h1><p>ลองเปิดหน้านี้ใหม่อีกครั้ง</p>'); return; }
-  window.DATA = { rows: j.ok === false ? [] : normRows(j), settings: Object.assign({ kpi: 10, warnBuffer: 1.5 }, j.settings || {}), updated: j.updated || null, apiV: j.v || 1, apiError: j.ok === false ? (j.message || j.error) : null };
+  window.DATA = { rows: j.ok === false ? [] : normRows(j), settings: Object.assign({ kpi: 10, warnBuffer: 1.5, gA: 8, gB: 10, gC: 12, gD: 14, gE: 16 }, j.settings || {}), updated: j.updated || null, apiV: j.v || 1, apiError: j.ok === false ? (j.message || j.error) : null };
   if (key) {
     try { await api({ a: 'auth' }); window.ADMIN = true; }
     catch (e) { try { sessionStorage.removeItem(KEY_NAME); } catch (x) {} if (wantAdmin) { askKey(e.message === 'denied' ? 'รหัสไม่ถูกต้อง' : 'ติดต่อระบบข้อมูลไม่ได้ ตรวจว่า Deploy Code.gs เวอร์ชันใหม่แล้ว'); return; } }
@@ -61,7 +61,7 @@ async function start() {
     await loadScript('nim-calc.js?v=' + v);
     document.getElementById('boot').hidden = true; document.getElementById('app').hidden = false;
     await loadScript('app.js?v=' + v);
-    if (window.ADMIN) await loadScript('admin.js?v=' + v);
+    if (window.ADMIN) { await loadScript('admin.js?v=' + v); await loadScript('share.js?v=' + v); }
   } catch (e) { bootMsg('<h1>โหลดหน้าเว็บไม่สำเร็จ</h1><p>ลองเปิดหน้านี้ใหม่อีกครั้ง</p>'); }
 }
 start();

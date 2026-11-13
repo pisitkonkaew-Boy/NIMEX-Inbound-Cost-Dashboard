@@ -3,6 +3,7 @@
 'use strict';
 const C = window.NIMCalc;
 C.SETTINGS.kpi = +DATA.settings.kpi; C.SETTINGS.warnBuffer = +DATA.settings.warnBuffer;
+['gA', 'gB', 'gC', 'gD', 'gE'].forEach((k, i) => { const v = +DATA.settings[k]; C.SETTINGS[k] = v > 0 ? v : [8, 10, 12, 14, 16][i]; });
 const RAW = DATA.rows;
 const D = C.buildDerived(RAW);
 
