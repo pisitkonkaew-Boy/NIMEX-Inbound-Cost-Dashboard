@@ -1,6 +1,6 @@
 /**
  * NIMEX Inbound Cost Dashboard — Google Apps Script (Web App)
- * ใช้ Google Sheet เดิมได้เลย: ชีต "data" 14 คอลัมน์ลำดับเดิม ข้อมูลเดิมไม่หาย
+ * ใช้ Google Sheet เดิมได้เลย: ชีต "data" 15 คอลัมน์ (เพิ่มคอลัมน์ O = งาน) ข้อมูลเดิมไม่หาย ถือเป็นเข้ารับอย่างเดียว
  *
  * ===================== วิธีติดตั้ง / อัปเดต =====================
  * 1) เปิด Google Sheet เดิม -> ส่วนขยาย (Extensions) -> Apps Script
@@ -19,9 +19,10 @@
  */
 
 var SHEET_NAME = 'data';
-var FIELDS = ['i', 'dc', 'dn', 'dt', 'pl', 'g', 'rc', 'rd', 'rty', 'bl', 'bx', 'rv', 'co', 'pt'];
+var FIELDS = ['i', 'dc', 'dn', 'dt', 'pl', 'g', 'rc', 'rd', 'rty', 'bl', 'bx', 'rv', 'co', 'pt', 'ty'];
 var HEADERS_TH = ['เลขที่ใบรายการ', 'DC', 'ชื่อ DC', 'วันที่ (พ.ศ.)', 'ทะเบียนรถ', 'กลุ่ม (AB/CC)',
-  'รหัสเส้นทาง', 'เส้นทาง', 'ประเภทอัตรา', 'บิล', 'กล่อง', 'รายได้', 'ค่าจ้าง (จริง)', 'จุดเข้ารับ'];
+  'รหัสเส้นทาง', 'เส้นทาง', 'ประเภทอัตรา', 'บิล', 'กล่อง', 'รายได้', 'ค่าจ้าง (จริง)', 'จุดเข้ารับ', 'งาน (IN=เข้ารับอย่างเดียว, DI=เข้ารับในสาย)'];
+var TY_COL = 14;   // คอลัมน์ O: ประเภทงาน (ข้อมูลเดิมว่าง = เข้ารับอย่างเดียว)
 var TEXT_COLS = 9;
 var NCOLS = FIELDS.length;
 var MAX_ROWS_PER_POST = 5000;
@@ -35,6 +36,7 @@ function dataSheet_() {
   var sh = ss_().getSheetByName(SHEET_NAME);
   if (!sh) sh = ss_().insertSheet(SHEET_NAME);
   if (sh.getLastRow() === 0) { sh.getRange(1, 1, 1, NCOLS).setValues([HEADERS_TH]); sh.setFrozenRows(1); }
+  else if (String(sh.getRange(1, NCOLS).getValue()) === '') sh.getRange(1, NCOLS).setValue(HEADERS_TH[NCOLS - 1]);
   return sh;
 }
 function tab_(name, head) {
@@ -55,6 +57,7 @@ function cleanRow_(r) {
   for (var c = 0; c < NCOLS; c++) {
     var v = r[c];
     if (c === 3) out.push(dateText_(v));
+    else if (c === TY_COL) out.push(String(v == null ? '' : v).trim() === 'DI' ? 'DI' : 'IN');
     else if (c < TEXT_COLS) out.push(String(v == null ? '' : v).trim());
     else out.push(Number(v) || 0);
   }
@@ -72,6 +75,7 @@ function writeRows_(rows) {
   if (n > 1) sh.getRange(2, 1, n - 1, NCOLS).clearContent();
   if (!rows.length) return;
   sh.getRange(2, 1, Math.max(rows.length, 1), TEXT_COLS).setNumberFormat('@');
+  sh.getRange(2, TY_COL + 1, rows.length, 1).setNumberFormat('@');
   sh.getRange(2, 1, rows.length, NCOLS).setValues(rows);
 }
 
@@ -105,7 +109,7 @@ function cachePut_(s) {
 function cacheClear_() { CacheService.getScriptCache().remove(CK + '-n'); }
 
 function publicJson_() {
-  return JSON.stringify({ ok: true, v: 2, cols: FIELDS, rows: readRows_(), settings: readSettings_(), updated: new Date().toISOString() });
+  return JSON.stringify({ ok: true, v: 3, cols: FIELDS, rows: readRows_(), settings: readSettings_(), updated: new Date().toISOString() });
 }
 
 function doGet() {

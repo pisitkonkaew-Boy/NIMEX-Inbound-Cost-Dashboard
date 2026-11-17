@@ -6,7 +6,12 @@
 (function (root) {
   'use strict';
   var DC_FILTER = ['610', '621', '691'];
-  var SETTINGS = { kpi: 10, warnBuffer: 1.5 };
+  var SETTINGS = { kpi: 10, warnBuffer: 1.5, gA: 8, gB: 10, gC: 12, gD: 14, gE: 16 };
+  /* งาน: IN = เข้ารับอย่างเดียว (คอลัมน์ F ขึ้นต้น "เข้ารับ"), DI = เข้ารับในสาย (คอลัมน์ F ขึ้นต้น "กระจาย" และมีงานเข้ารับ)
+     สัดส่วนจริง (เฉพาะ DI): รายได้ค่าขนส่งเข้ารับของใบ < 1,500 -> จุด × 50 บาท, ตั้งแต่ 1,500 -> 5% ของรายได้ค่าขนส่งเข้ารับ */
+  var WORK = { IN: 'เข้ารับอย่างเดียว', DI: 'เข้ารับในสาย' };
+  var PROP = { th: 1500, perPoint: 50, pct: 5 };
+  function propCost(rv, pt) { return rv < PROP.th ? pt * PROP.perPoint : rv * PROP.pct / 100; }
 
   function n(v) { v = +v; return isFinite(v) ? v : 0; }
 
@@ -43,7 +48,8 @@
       var invNum = Number(inv); if (!isFinite(invNum) || invNum <= 0) return;
       var dc = firstToken(row[1]); if (DC_FILTER.indexOf(dc) === -1) return;
       var rate = (row[5] == null ? '' : String(row[5])).trim();
-      if (rate.indexOf('เข้ารับ') !== 0) return;                 // เฉพาะเข้ารับ
+      var ty = rate.indexOf('เข้ารับ') === 0 ? 'IN' : rate.indexOf('กระจาย') === 0 ? 'DI' : '';
+      if (!ty) return;                                            // เฉพาะเข้ารับอย่างเดียว / กระจาย
       var ad = firstToken(row[29]), g;
       if (ad === '040' || ad === '041') g = 'AB'; else if (ad === '042') g = 'CC'; else return;
       var o = g === 'AB' ? 38 : 42;
@@ -51,7 +57,8 @@
       if (dv instanceof Date) dt = String(dv.getDate()).padStart(2, '0') + '/' + String(dv.getMonth() + 1).padStart(2, '0') + '/' + (dv.getFullYear() + 543);
       else dt = (dv == null ? '' : String(dv)).trim();
       var rt = splitRoute(row[11]);
-      out.push({
+      if (ty === 'DI' && !(n(row[o + 2]) > 0) && !(n(row[47]) > 0)) return;   // ใบกระจายที่ไม่มีงานเข้ารับ ไม่นับ
+      out.push({ ty: ty,
         i: String(Math.round(invNum)), dc: dc, dn: dcNameOf(row[1]), dt: dt,
         pl: (row[7] == null ? '' : String(row[7])).trim(), g: g, rc: rt.code, rd: rt.desc,
         rty: (row[10] == null ? '' : String(row[10])).trim(),
@@ -72,32 +79,49 @@
   /* ---------- 3) คอลัมน์คำนวณ: เที่ยวเดี่ยว/หลายเที่ยว, ค่าจ้างประมาณการเมื่อเป็น 0 ---------- */
   function buildDerived(RAW) {
     var sumP = {}, cntP = {}, sumG = {}, cntG = {}, trip = {};
-    RAW.forEach(function (r) {
-      var tk = r.pl + '|' + r.dt; trip[tk] = (trip[tk] || 0) + 1;     // ใบงานต่อทะเบียนต่อวัน
+    var tyOf = function (r) { return r.ty === 'DI' ? 'DI' : 'IN'; };       // ข้อมูลเดิมที่ไม่มีประเภท = เข้ารับอย่างเดียว
+    RAW.forEach(function (r) {                                       // เที่ยว / ค่าเฉลี่ยค่าจ้าง คิดแยกตามงาน
+      var t = tyOf(r), pk = t + '|' + r.pl;
+      var tk = t + '|' + r.pl + '|' + r.dt; trip[tk] = (trip[tk] || 0) + 1;     // ใบงานต่อทะเบียนต่อวัน
       if (n(r.co) > 0) {
-        sumP[r.pl] = (sumP[r.pl] || 0) + n(r.co); cntP[r.pl] = (cntP[r.pl] || 0) + 1;
-        var gk = r.dc + '|' + r.g; sumG[gk] = (sumG[gk] || 0) + n(r.co); cntG[gk] = (cntG[gk] || 0) + 1;
+        sumP[pk] = (sumP[pk] || 0) + n(r.co); cntP[pk] = (cntP[pk] || 0) + 1;
+        var gk = t + '|' + r.dc + '|' + r.g; sumG[gk] = (sumG[gk] || 0) + n(r.co); cntG[gk] = (cntG[gk] || 0) + 1;
       }
     });
     return RAW.map(function (r) {
-      var d = parseThaiDate(r.dt), tk = r.pl + '|' + r.dt;
+      var t = tyOf(r), pk = t + '|' + r.pl, d = parseThaiDate(r.dt), tk = t + '|' + r.pl + '|' + r.dt;
       var eff = n(r.co), est = false;
       if (!(n(r.co) > 0)) {                                           // ค่าจ้าง 0 -> เฉลี่ยทะเบียนเดียวกัน, ไม่มีก็เฉลี่ย DC+กลุ่ม
-        if (cntP[r.pl] > 0) { eff = sumP[r.pl] / cntP[r.pl]; est = true; }
+        if (cntP[pk] > 0) { eff = sumP[pk] / cntP[pk]; est = true; }
         else {
-          var g2 = r.dc + '|' + r.g;
+          var g2 = t + '|' + r.dc + '|' + r.g;
           if (cntG[g2] > 0) { eff = sumG[g2] / cntG[g2]; est = true; } else eff = 0;
         }
       }
-      var rv = n(r.rv);
+      var rv = n(r.rv), pt = n(r.pt), effP = t === 'DI' ? propCost(rv, pt) : eff;
       return {
-        i: r.i, dc: r.dc, dn: r.dn, dt: r.dt, pl: r.pl, g: r.g, rc: r.rc, rd: r.rd, rty: r.rty,
-        bl: n(r.bl), bx: n(r.bx), rv: rv, co: n(r.co), pt: n(r.pt),
+        i: r.i, ty: t, dc: r.dc, dn: r.dn, dt: r.dt, pl: r.pl, g: r.g, rc: r.rc, rd: r.rd, rty: r.rty,
+        bl: n(r.bl), bx: n(r.bx), rv: rv, co: n(r.co), pt: pt,
         dateObj: d, mKey: monthKeyOf(d), tripKey: tk, isMulti: (trip[tk] || 0) >= 2,
-        effCost: eff, isEstimated: est,
+        effCost: eff, isEstimated: est, effN: eff, estN: est, effP: effP, byPoint: t === 'DI' && rv < PROP.th,
         pct: rv > 0 ? eff / rv * 100 : (eff > 0 ? null : 0)
       };
     });
+  }
+  /* วิธีคำนวณ: 'normal' = ค่าจ้างจริง (เติมค่าเฉลี่ยเมื่อเป็น 0) ; 'prop' = สัดส่วนจริง (มีผลเฉพาะงานเข้ารับในสาย) */
+  function applyCalc(DERIVED, calc) {
+    DERIVED.forEach(function (r) {
+      var p = calc === 'prop' && r.ty === 'DI';
+      r.effCost = p ? r.effP : r.effN; r.isEstimated = p ? false : r.estN;
+      r.pct = r.rv > 0 ? r.effCost / r.rv * 100 : (r.effCost > 0 ? null : 0);
+    });
+    return DERIVED;
+  }
+  function gradeOf(p) {
+    if (p === null || p === undefined || !isFinite(p)) return '–';
+    var b = [SETTINGS.gA, SETTINGS.gB, SETTINGS.gC, SETTINGS.gD, SETTINGS.gE], G = 'ABCDE';
+    for (var i = 0; i < 5; i++) if (p <= b[i]) return G[i];
+    return 'F';
   }
 
   /* ---------- 4) ตัวกรอง (ค่า 'all' = ไม่กรอง; trip = 'single'|'multi') ---------- */
@@ -108,6 +132,7 @@
       if (F.month && F.month !== 'all' && r.mKey !== F.month) return false;
       if (F.date && F.date !== 'all' && r.dt !== F.date) return false;
       if (F.group && F.group !== 'all' && r.g !== F.group) return false;
+      if (F.work && F.work !== 'all' && r.ty !== F.work) return false;
       if (F.trip === 'single' && r.isMulti) return false;
       if (F.trip === 'multi' && !r.isMulti) return false;
       return true;
@@ -147,22 +172,23 @@
   function buildVehicleRows(rows) {
     var map = new Map();
     rows.forEach(function (r) {
-      if (!map.has(r.pl)) map.set(r.pl, { pl: r.pl, dcSet: {}, gSet: {}, routeMap: {}, agg: mkAgg() });
-      var o = map.get(r.pl); o.dcSet[r.dc] = true; o.gSet[r.g] = true;
+      var vk = r.pl + '|' + (r.ty || 'IN');                        // รถผิดปกติคิดแยกตามงาน
+      if (!map.has(vk)) map.set(vk, { pl: r.pl, ty: r.ty || 'IN', dcSet: {}, gSet: {}, routeMap: {}, agg: mkAgg() });
+      var o = map.get(vk); o.dcSet[r.dc] = true; o.gSet[r.g] = true;
       var rk = r.rc || r.rd || 'ไม่ระบุ'; o.routeMap[rk] = (o.routeMap[rk] || 0) + 1; accum(o.agg, r);
     });
     var arr = Array.from(map.values()), buckets = {}, median = {};
     arr.forEach(function (o) {
       finalizeAgg(o.agg); o.dc = Object.keys(o.dcSet)[0]; o.g = Object.keys(o.gSet)[0];
       o.costPerTrip = o.agg.trips > 0 ? o.agg.cost / o.agg.trips : 0;
-      (buckets[o.dc + '|' + o.g] = buckets[o.dc + '|' + o.g] || []).push(o.costPerTrip);
+      var bk = o.ty + '|' + o.dc + '|' + o.g; (buckets[bk] = buckets[bk] || []).push(o.costPerTrip);
     });
     Object.keys(buckets).forEach(function (k) {
       var s = buckets[k].slice().sort(function (a, b) { return a - b; });
       median[k] = s.length ? s[Math.floor(s.length / 2)] : 0;
     });
     arr.forEach(function (o) {                // รถผิดปกติ: ≥2 เที่ยว และ ค่าจ้าง/เที่ยว > 1.5× มัธยฐานของ DC+กลุ่ม
-      var med = median[o.dc + '|' + o.g] || 0;
+      var med = median[o.ty + '|' + o.dc + '|' + o.g] || 0;
       o.medianCostPerTrip = med;
       o.anomaly = (o.agg.trips >= 2 && med > 0 && o.costPerTrip > med * 1.5);
     });
@@ -199,7 +225,7 @@
   }
 
   var api = {
-    DC_FILTER: DC_FILTER, SETTINGS: SETTINGS, n: n,
+    DC_FILTER: DC_FILTER, SETTINGS: SETTINGS, n: n, WORK: WORK, PROP: PROP, propCost: propCost, applyCalc: applyCalc, gradeOf: gradeOf,
     parseThaiDate: parseThaiDate, monthKeyOf: monthKeyOf, firstToken: firstToken, splitRoute: splitRoute,
     processSheetRows: processSheetRows, mergeRecords: mergeRecords, buildDerived: buildDerived,
     getFiltered: getFiltered, aggregate: aggregate, pctClass: pctClass,

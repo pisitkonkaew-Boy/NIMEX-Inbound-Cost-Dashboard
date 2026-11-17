@@ -6,6 +6,9 @@ C.SETTINGS.kpi = +DATA.settings.kpi; C.SETTINGS.warnBuffer = +DATA.settings.warn
 ['gA', 'gB', 'gC', 'gD', 'gE'].forEach((k, i) => { const v = +DATA.settings[k]; C.SETTINGS[k] = v > 0 ? v : [8, 10, 12, 14, 16][i]; });
 const RAW = DATA.rows;
 const D = C.buildDerived(RAW);
+const HAS_DI = D.some(r => r.ty === 'DI');          // มีงานเข้ารับในสายในข้อมูล -> แสดงแถบงาน / วิธีคำนวณ
+const WORKS = { all: 'รวม', IN: 'เข้ารับอย่างเดียว', DI: 'เข้ารับในสาย' };
+const CALCS = { normal: 'ปกติ', prop: 'สัดส่วนจริง' };
 
 /* ---------- format ---------- */
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -38,11 +41,12 @@ const WEEKS = [...new Set(D.filter(r => r.dateObj).map(r => C.weekKeyOf(r.dateOb
 const LAST = DAYS.length ? C.parseThaiDate(DAYS[DAYS.length - 1]) : null;
 const FIRST = DAYS.length ? C.parseThaiDate(DAYS[0]) : null;
 
-const S = { page: 'home', group: 'all', mode: 'month', per: MONTHS[MONTHS.length - 1] || 'all', dc: 'all', trip: 'all', route: '', plate: '', q: {}, sort: {}, cmp: 'pct', adim: 'route', am: 'pct', dm: 'pct', vf: 'all', showRoutes: false, open: {}, allAct: false };
+const S = { page: 'home', work: 'all', calc: 'prop', group: 'all', mode: 'month', per: MONTHS[MONTHS.length - 1] || 'all', dc: 'all', trip: 'all', route: '', plate: '', q: {}, sort: {}, cmp: 'pct', adim: 'route', am: 'pct', dm: 'pct', vf: 'all', showRoutes: false, open: {}, allAct: false };
 
+C.applyCalc(D, S.calc);
 /* ---------- filters (ใช้ getFiltered / rowsForPeriod ของ nim-calc) ---------- */
 function filt(o = {}) {
-  const s = { ...S, ...o }, F = { dc: s.dc, group: s.group, trip: s.trip };
+  const s = { ...S, ...o }, F = { dc: s.dc, group: s.group, trip: s.trip, work: s.work };
   if (s.mode === 'month' && s.per !== 'all') F.month = s.per;
   if (s.mode === 'day' && s.per !== 'all') F.date = s.per;
   let r = C.getFiltered(D, F);
@@ -79,7 +83,11 @@ function rangeLabel(s = S) {
   if (s.mode === 'week') return 'สัปดาห์ ' + wLabel(s.per);
   const c = curRange(s); return mLabel(s.per) + (c && !c.full ? ` (ถึง ${c.b.getDate()})` : '');
 }
-const scopeText = () => [S.dc === 'all' ? 'ทุก DC' : dcName(S.dc), GROUPS[S.group], TRIPS[S.trip]].join(' · ');
+const showCalc = () => HAS_DI && S.work !== 'IN';
+const workText = () => !HAS_DI ? '' : (S.work === 'all' ? 'รวม 2 งาน' : WORKS[S.work]) + (showCalc() ? ' · เข้ารับในสายคิดแบบ' + CALCS[S.calc] : '');
+const scopeText = () => [S.dc === 'all' ? 'ทุก DC' : dcName(S.dc), GROUPS[S.group], TRIPS[S.trip], workText()].filter(Boolean).join(' · ');
+const gradeOf = p => C.gradeOf(p);
+const GRC = { A: 'var(--gA)', B: 'var(--gB)', C: 'var(--gC)', D: 'var(--gD)', E: 'var(--gF)', F: 'var(--gF)' };
 
 /* ---------- palette + charts (SVG ล้วน ใช้ทั้งหน้าจอและไฟล์ส่งออก) ---------- */
 function pal() { const s = getComputedStyle(document.documentElement), g = k => s.getPropertyValue(k).trim(); return { ink: g('--ink'), muted: g('--muted'), line: g('--line'), panel: g('--panel'), s: [g('--s1'), g('--s2'), g('--s3'), g('--s4'), g('--s5')], bad: g('--bad'), warn: g('--warn'), good: g('--good'), gold: g('--gold-l'), up: g('--up') || '#1f8a4c' }; }
@@ -141,14 +149,18 @@ const MET = {
 const excessOf = a => a.cost - a.revenue * C.SETTINGS.kpi / 100;
 function kpiData() {
   const rows = filt(), A = C.aggregate(rows), pr = prevRange(), PA = pr ? C.aggregate(between(pr.a, pr.b)) : null, q = PA && PA.total.trips > 0;
+  const byWork = HAS_DI && S.work === 'all', AW = byWork ? { IN: C.aggregate(rows.filter(r => r.ty === 'IN')), DI: C.aggregate(rows.filter(r => r.ty === 'DI')) } : null;
   const keys = ['revenue', 'cost', 'pct', 'points', 'trips', 'bills', 'boxes', 'avgPoints'];
   const lab = { revenue: 'รายได้', cost: 'ค่าจ้าง', pct: '% ค่าจ้างต่อรายได้', points: 'จุดเข้ารับ', trips: 'เที่ยว', bills: 'บิล', boxes: 'กล่อง', avgPoints: 'จุดเฉลี่ยต่อเที่ยว' };
   const unit = { revenue: 'บาท', cost: 'บาท', pct: '', points: 'จุด', trips: 'เที่ยว', bills: 'บิล', boxes: 'กล่อง', avgPoints: 'จุด/เที่ยว' };
   const list = keys.map(k => {
     const M = MET[k], v = M.f(A.total), d = q ? C.diff(v, M.f(PA.total), M.hi, !!M.isPct) : null;
-    const sub = k === 'pct' ? `KPI ≤ ${fmtN(C.SETTINGS.kpi, 2)}%` + (S.group === 'all' ? ` · AB ${fmtP(A.AB.pct)} · CC ${fmtP(A.CC.pct)}` : '') : S.group === 'all' ? `AB ${M.x(M.f(A.AB))} · CC ${M.x(M.f(A.CC))}` : GROUPS[S.group];
+    const gx = g => A[g].trips || (k !== 'pct' && k !== 'avgPoints') ? M.x(M.f(A[g])) : '–';   // กลุ่มที่ไม่มีงาน แสดง – แทน 0
+    const sub = k === 'pct' ? `KPI ≤ ${fmtN(C.SETTINGS.kpi, 2)}%` + (S.group === 'all' ? ` · AB ${gx('AB')} · CC ${gx('CC')}` : '') : S.group === 'all' ? `AB ${gx('AB')} · CC ${gx('CC')}` : GROUPS[S.group];
     const cls = k === 'pct' ? pc(v) : 'none';
-    return { id: k, l: lab[k], v, txt: M.x(v), unit: unit[k], sub, cls, d, prev: q ? M.x(M.f(PA.total)) : '', dtxt: d && d.text ? (d.dir > 0 ? '▲ ' : d.dir < 0 ? '▼ ' : '') + d.text : d && d.dir === 0 ? 'เท่าเดิม' : '' };
+    const wx = t => AW[t].total.trips || (k !== 'pct' && k !== 'avgPoints') ? M.x(M.f(AW[t].total)) : '–';
+    const sub2 = byWork ? `อย่างเดียว ${wx('IN')} · ในสาย ${wx('DI')}` : '';
+    return { id: k, l: lab[k], v, txt: M.x(v), unit: unit[k], sub, sub2, grade: k === 'pct' && A.total.trips ? gradeOf(v) : '', cls, d, prev: q ? M.x(M.f(PA.total)) : '', dtxt: d && d.text ? (d.dir > 0 ? '▲ ' : d.dir < 0 ? '▼ ' : '') + d.text : d && d.dir === 0 ? 'เท่าเดิม' : '' };
   });
   return { rows, A, PA: q ? PA : null, pr: q ? pr : null, list };
 }
@@ -209,6 +221,9 @@ function perOptions(mode) {
 function renderShell() {
   const he = $('#hdr-export'); if (he) he.hidden = !window.ADMIN;
   const seg = (arr, val, act) => arr.map(([k, t]) => `<button data-act="${act}:${k}" aria-pressed="${val === k}">${t}</button>`).join('');
+  const sw = $('#seg-work'), sc = $('#seg-calc');
+  if (sw) { sw.hidden = !HAS_DI; sw.innerHTML = seg(Object.entries(WORKS), S.work, 'work'); }
+  if (sc) { sc.hidden = !showCalc(); sc.innerHTML = seg(Object.entries(CALCS), S.calc, 'calc'); }
   $('#seg-group').innerHTML = seg([['all', 'รวม'], ['AB', 'AB แห้ง'], ['CC', 'CC เย็น']], S.group, 'group');
   $('#seg-mode').innerHTML = seg([['day', 'วัน'], ['week', 'สัปดาห์'], ['month', 'เดือน']], S.mode, 'mode');
   const opt = (v, t, cur) => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(t)}</option>`;
@@ -219,6 +234,7 @@ function renderShell() {
 function chips() {
   const c = [];
   if (S.dc !== 'all') c.push(`<button class="chip" data-act="dc:all">DC ${esc(dcName(S.dc))} ✕</button>`);
+  if (HAS_DI && S.work !== 'all') c.push(`<button class="chip" data-act="work:all">${esc(WORKS[S.work])} ✕</button>`);
   if (S.group !== 'all') c.push(`<button class="chip" data-act="group:all">${esc(GROUPS[S.group])} ✕</button>`);
   if (S.trip !== 'all') c.push(`<button class="chip" data-act="trip:all">${esc(TRIPS[S.trip])} ✕</button>`);
   if (S.route) { const r = routeAgg(D.filter(x => routeKey(x) === S.route))[0]; c.push(`<button class="chip" data-act="route:">เส้นทาง ${esc(r ? r.name : S.route)} ✕</button>`); }
@@ -261,7 +277,7 @@ function statsHtml(K) {
 }
 function kpiHtml(K) {
   const X = extraStats(K.rows, K.A);
-  return `<div class="kpis" id="kpi-grid">${K.list.map(k => `<button class="kpi" style="--bar:${barOf(k.cls)}" data-act="page:${k.id === 'pct' || k.id === 'cost' ? 'analysis' : k.id === 'revenue' ? 'dc' : 'daily'}" aria-label="${esc(k.l + ' ' + k.txt)}">${badge(k.cls) ? `<span class="g">${badge(k.cls)}</span>` : ''}<span class="l">${esc(k.l)}</span><span class="v">${esc(k.txt)}${k.unit && k.id !== 'pct' ? ` <small>${esc(k.unit)}</small>` : ''}</span><span class="d">${esc(k.sub)}</span><span class="s">${k.dtxt ? `<b class="${k.d.color === 'good' ? 'up' : k.d.color === 'bad' ? 'dn' : 'eq'}">${esc(k.dtxt)}</b><span class="pv"> · ก่อนหน้า ${esc(k.prev)}</span>` : '&nbsp;'}</span></button>`).join('')}</div>
+  return `<div class="kpis" id="kpi-grid">${K.list.map(k => `<button class="kpi" style="--bar:${barOf(k.cls)}" data-act="page:${k.id === 'pct' || k.id === 'cost' ? 'analysis' : k.id === 'revenue' ? 'dc' : 'daily'}" aria-label="${esc(k.l + ' ' + k.txt)}">${badge(k.cls) ? `<span class="g">${badge(k.cls)}</span>` : ''}${k.grade ? `<span class="kg" style="background:${GRC[k.grade]}">เกรด ${k.grade}</span>` : ''}<span class="l">${esc(k.l)}</span><span class="v">${esc(k.txt)}${k.unit && k.id !== 'pct' ? ` <small>${esc(k.unit)}</small>` : ''}</span><span class="d">${esc(k.sub)}</span>${k.sub2 ? `<span class="d d2">${esc(k.sub2)}</span>` : ''}<span class="s">${k.dtxt ? `<b class="${k.d.color === 'good' ? 'up' : k.d.color === 'bad' ? 'dn' : 'eq'}">${esc(k.dtxt)}</b><span class="pv"> · ก่อนหน้า ${esc(k.prev)}</span>` : '&nbsp;'}</span></button>`).join('')}</div>
   ${statsHtml(K)}
   ${K.pr ? `<p class="note" style="margin:-4px 0 0">ลูกศรเทียบกับ ${esc(K.pr.l)} · สีน้ำเงินเขียว = ดีขึ้น สีแดง = แย่ลง</p>` : ''}`;
 }
@@ -365,7 +381,7 @@ function trendChart(P, w, h, metric = 'pct') {
   return { T, svg: lineChart({ labels: T.labels, series: T.series, fmt: M.ax, tfmt: M.x, P, W: w, H: h || Math.round(Math.max(230, Math.min(340, w * .36))), acts: T.acts, tips: T.tips, refLine: metric === 'pct' ? C.SETTINGS.kpi : null, refLabel: 'KPI ' + fmtN(C.SETTINGS.kpi, 2) + '%', mark: T.mark, markLabel: T.markLabel }) };
 }
 const legendGroups = P => LEG(groupsShown().map(g => [GCOL(P, g === 'T' ? '' : g), GNAME[g]]));
-function splitParts(A, P) { return ['AB', 'CC'].filter(g => S.group === 'all' || S.group === g).map(g => ({ g, l: GNAME[g], v: A[g].cost, c: GCOL(P, g), tip: `${GNAME[g]}: ค่าจ้าง ${fmtN(A[g].cost)} บาท · รายได้ ${fmtN(A[g].revenue)} บาท · ${fmtP(A[g].pct)}` })); }
+function splitParts(A, P) { return ['AB', 'CC'].filter(g => (S.group === 'all' || S.group === g) && (A[g].trips > 0 || !HAS_DI)).map(g => ({ g, l: GNAME[g], v: A[g].cost, c: GCOL(P, g), tip: `${GNAME[g]}: ค่าจ้าง ${fmtN(A[g].cost)} บาท · รายได้ ${fmtN(A[g].revenue)} บาท · ${fmtP(A[g].pct)}` })); }
 
 /* ---------- pages ---------- */
 const VIEW = {}; let goDetail = false;
@@ -402,10 +418,46 @@ function cmpTable() {
   return { html: table('cmp', cols, rows, { act: o => 'dc:' + o.key, sel: o => o.key === S.dc, sort: { k: 'name', d: 1 }, sum, sumLabel: 'รวมทุก DC' }), pr, n };
 }
 const metric_cls = (m, v) => m === 'pct' ? 'p-' + pc(v) : '';
+/* ---------- งาน: เข้ารับอย่างเดียว / เข้ารับในสาย ---------- */
+const WCOL = { IN: 'var(--navy2)', DI: 'var(--s5)' };
+function propNote(rows) {
+  const di = rows.filter(r => r.ty === 'DI'), pp = di.filter(r => r.byPoint).length, Pp = C.PROP;
+  return `<div class="pnote"><b>วิธีคิดค่าจ้าง เข้ารับในสาย (${esc(CALCS[S.calc])})</b>${S.calc === 'prop' ? `<span>รายได้ค่าขนส่งเข้ารับต่อใบ (AB = AO, CC = AS) น้อยกว่า ${fmtN(Pp.th)} → จุด × ${fmtN(Pp.perPoint)} บาท</span><span>ตั้งแต่ ${fmtN(Pp.th)} → ${fmtN(Pp.pct)}% ของรายได้ค่าขนส่งเข้ารับ</span><span class="mut">จุด×${fmtN(Pp.perPoint)}: ${fmtN(pp)} ใบ · ${fmtN(Pp.pct)}%: ${fmtN(di.length - pp)} ใบ</span>` : `<span>ค่าจ้างจริง (AP / AT) ÷ รายได้ค่าขนส่งเข้ารับ (AO / AS) · ค่าจ้างที่เป็น 0 ใช้ค่าเฉลี่ยตามกฎเดิม</span>`}</div>`;
+}
+function workPanel(t, K, P, w) {
+  const rows = K.rows.filter(r => r.ty === t), A = C.aggregate(rows), T = A.total, g = gradeOf(T.pct), all = S.group === 'all';
+  const tag = t === 'IN' ? 'ค่าจ้างจริง ÷ รายได้' : S.calc === 'prop' ? 'สัดส่วนจริง: ค่าจ้างคำนวณ ÷ รายได้ค่าขนส่งเข้ารับ' : 'ปกติ: ค่าจ้างจริง ÷ รายได้ค่าขนส่งเข้ารับ';
+  const gl = gg => A[gg].trips ? `<p><i class="gtag ${gg}">${gg}</i> รายได้ ${fmtN(A[gg].revenue)} · ค่าจ้าง ${fmtN(A[gg].cost)} <b class="t-${pc(A[gg].pct)}">${fmtP(A[gg].pct)}</b></p>` : `<p><i class="gtag ${gg}">${gg}</i> <span class="mut">ไม่มีงานในช่วงนี้</span></p>`;
+  const tr = trendRows().filter(r => r.ty === t);
+  return `<section class="card wp" style="--wc:${WCOL[t]}"><button class="wp-h" data-act="work:${t}" aria-label="ดูเฉพาะ${WORKS[t]}"><span><b>${WORKS[t]}</b><small>${esc(tag)}</small></span><span class="wp-k"><b class="t-${pc(T.pct)}">${fmtP(T.pct)}</b>${T.trips ? `<i class="grd" style="background:${GRC[g] || 'var(--muted)'}">เกรด ${g}</i>` : ''}</span></button>
+  ${T.trips ? `<div class="wp-m"><div><b>${fmtN(T.revenue)}</b><span>รายได้</span></div><div><b>${fmtN(T.cost)}</b><span>ค่าจ้าง</span></div><div><b>${fmtN(T.trips)}</b><span>เที่ยว</span></div><div><b>${fmtN(T.points)}</b><span>จุด</span></div><div><b>${fmtN(T.avgPoints, 2)}</b><span>จุด/เที่ยว</span></div><div><b>${fmtN(T.trips ? T.cost / T.trips : 0)}</b><span>ค่าจ้าง/เที่ยว</span></div></div>
+  ${all ? `<div class="wp-g">${gl('AB')}${gl('CC')}</div>` : ''}
+  <h3>% ค่าจ้างต่อรายได้ รายวัน</h3><div class="chart">${trendSvg(P, w, 'pct', tr, Math.round(Math.max(210, Math.min(280, w * .42))))}</div>${legendGroups(P)}` : '<p class="note">ไม่มีงานในเงื่อนไขนี้</p>'}</section>`;
+}
+function dcWorkTable() {
+  const rows = filt({ dc: 'all' }), ag = (x, t) => C.aggregate(t ? x.filter(r => r.ty === t) : x).total;
+  const cells = a => `<td class="bl">${a.trips ? fmtN(a.revenue) : '–'}</td><td>${a.trips ? fmtN(a.cost) : '–'}</td><td class="p-${pc(a.pct)}">${a.trips ? fmtP(a.pct) : '–'}</td>`;
+  const row = (name, x, act, cls = '') => `<tr class="${cls}"${act ? ` data-act="${act}"` : ''}><td>${esc(name)}</td>${cells(ag(x, 'IN'))}${cells(ag(x, 'DI'))}${cells(ag(x))}</tr>`;
+  const head = `<tr><th rowspan="2">DC</th><th colspan="3" class="gh">เข้ารับอย่างเดียว</th><th colspan="3" class="gh">เข้ารับในสาย</th><th colspan="3" class="gh">รวม</th></tr><tr>${'<th class="bl">รายได้</th><th>ค่าจ้าง</th><th>%</th>'.repeat(3)}</tr>`;
+  return `<section class="card"><h2>ผลราย DC แยกตามงาน</h2><p class="note">กด DC เพื่อกรองทั้งหน้าและเปิดเส้นทาง ทะเบียนรถ และรายวัน กดซ้ำเพื่อปิด</p><div class="tw"><table class="t wt"><thead>${head}</thead><tbody>${DCS.map(dc => row(dcName(dc), rows.filter(r => r.dc === dc), 'dc:' + (dc === S.dc ? 'all' : dc), dc === S.dc ? 'sel' : '')).join('')}${row('รวม', rows, '', 'sum')}</tbody></table></div></section>`;
+}
 VIEW.home = () => {
+  if (HAS_DI && S.work === 'all') {
+    const K = kpiData(), P = pal(), w = WH(), ct = cmpTable();
+    return `<p class="eyebrow">NIMEX Inbound Cost Dashboard</p>${header('สรุปผล ' + rangeLabel(), esc(scopeText()) + ' · ' + esc(dataNote()))}${kpiHtml(K)}
+  <h2 class="sect">แยกตามงาน</h2><div class="grid2 wps">${workPanel('IN', K, P, w)}${workPanel('DI', K, P, w)}</div>
+  ${propNote(K.rows)}
+  ${dcWorkTable()}
+  ${dcDetail()}
+  <section class="card"><h2>เทียบรายเดือนตาม DC</h2><div class="tools" style="justify-content:center"><select id="f-cmp" aria-label="ตัวชี้วัดที่เทียบ">${CMP.map(k => `<option value="${k}"${k === S.cmp ? ' selected' : ''}>${esc(MET[k].t)}</option>`).join('')}</select></div><p class="note">${esc(GROUPS[S.group])} · รวม 2 งาน${ct.n > 1 && ct.pr ? ' · เปลี่ยน = เดือนล่าสุดเทียบ ' + esc(ct.pr.l) : ''}</p>${ct.html}</section>`;
+  }
+  return homeOne();
+};
+function homeOne() {
   const K = kpiData(), P = pal(), w = WW(), parts = splitParts(K.A, P), T = K.A.total, ct = cmpTable();
   const dcs = dcAgg(filt({ dc: 'all' })), isDay = S.mode === 'day' && S.per !== 'all', tc = trendChart(P, isDay ? W() : w);
-  return `<p class="eyebrow">NIMEX Inbound Cost Dashboard</p>${header('สรุปผล ' + rangeLabel(), esc(scopeText()) + ' · ' + esc(dataNote()))}${kpiHtml(K)}
+  return `<p class="eyebrow">NIMEX Inbound Cost Dashboard</p>${header('สรุปผล ' + rangeLabel() + (HAS_DI ? ' · ' + WORKS[S.work] : ''), esc(scopeText()) + ' · ' + esc(dataNote()))}${kpiHtml(K)}
+  ${HAS_DI && S.work === 'DI' ? propNote(K.rows) : ''}
   <div class="grid2 w">${isDay ? `<section class="card"><h2>% ค่าจ้างต่อรายได้ ราย DC แยก AB / CC</h2><p class="note">${K.pr ? 'ลูกศรเทียบ' + esc(K.pr.l.replace(/\s*\(.*\)/, '')) + ' · ' : ''}ตัวเลขใต้แท่ง = จำนวนเที่ยว · กดแท่งเพื่อเปิด DC</p><div class="chart">${dcBars(P, w, Math.round(Math.max(320, Math.min(420, w * .5))), true)}</div></section>` : `<section class="card"><h2>${esc(tc.T.title)}</h2><p class="note">เส้นประแดง = KPI ${fmtN(C.SETTINGS.kpi, 2)}% · ไม่แสดงวันอาทิตย์${tc.T.note ? ' · ' + esc(tc.T.note) : ''} · กดจุดเพื่อดูรายวัน</p><div class="chart">${tc.svg || '<p class="note">ไม่มีข้อมูลรายวันในเงื่อนไขนี้</p>'}</div>${legendGroups(P)}</section>`}
   <section class="card"><h2>สัดส่วนค่าจ้าง AB / CC</h2><p class="note">ค่าจ้างรวม ${fmtN(T.cost)} บาท</p><div class="chart" style="max-width:230px;margin:auto">${donut({ parts, center: fmtP(T.pct), sub: 'ค่าจ้าง ÷ รายได้', P })}</div>
   <div class="tw" style="margin-top:8px"><table class="t"><thead><tr><th>กลุ่ม</th><th>รายได้</th><th>ค่าจ้าง</th><th>%</th></tr></thead><tbody>${parts.map(p => `<tr data-act="group:${p.g}"><td><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${p.c};margin-right:6px"></i>${esc(p.l)}</td><td>${fmtN(K.A[p.g].revenue)}</td><td>${fmtN(K.A[p.g].cost)}</td><td class="p-${pc(K.A[p.g].pct)}">${fmtP(K.A[p.g].pct)}</td></tr>`).join('')}</tbody></table></div></section></div>
@@ -413,7 +465,7 @@ VIEW.home = () => {
   <section class="card"><h2>ผลราย DC</h2><p class="note">กด DC เพื่อกรองทั้งหน้าและเปิดเส้นทาง ทะเบียนรถ และรายวัน กดซ้ำเพื่อปิด</p>${table('dc', DCCOLS(), dcs, { act: x => 'dc:' + (x.dc === S.dc ? 'all' : x.dc), sel: x => x.dc === S.dc, sort: { k: 'name', d: 1 }, sum: sumOf(C.aggregate(filt({ dc: 'all' })).total) })}</section>
   ${dcDetail()}
   <section class="card"><h2>เทียบรายเดือนตาม DC</h2><div class="tools" style="justify-content:center"><select id="f-cmp" aria-label="ตัวชี้วัดที่เทียบ">${CMP.map(k => `<option value="${k}"${k === S.cmp ? ' selected' : ''}>${esc(MET[k].t)}</option>`).join('')}</select></div><p class="note">${esc(GROUPS[S.group])}${ct.n > 1 && ct.pr ? ' · เปลี่ยน = เดือนล่าสุดเทียบ ' + esc(ct.pr.l) : ''}</p>${ct.html}</section>`;
-};
+}
 
 /* DC → กลุ่ม → เส้นทาง */
 VIEW.dc = () => {
@@ -452,7 +504,7 @@ VIEW.dc = () => {
 VIEW.car = () => {
   const rows = filt(); let V = vehAgg(rows); const an = V.filter(v => v.anomaly).length;
   if (S.vf === 'anomaly') V = V.filter(v => v.anomaly);
-  const cols = [{ k: 'pl', t: 'ทะเบียน', v: x => x.pl, dir: 'text' }, { k: 'dc', t: 'DC', v: x => dcName(x.dc), dir: 'text', txt: x => dcName(x.dc) + (x.dcs.length > 1 ? ` +${x.dcs.length - 1}` : '') }, { k: 'g', t: 'กลุ่ม', v: x => x.g, dir: 'text', html: x => x.gs.map(gtag).join(' ') }, { k: 'route', t: 'เส้นทางหลัก', v: x => x.routeTop, dir: 'text', txt: x => x.routeTop + (x.routeN > 1 ? ` (+${x.routeN - 1})` : '') },
+  const cols = [{ k: 'pl', t: 'ทะเบียน', v: x => x.pl, dir: 'text' }, ...(HAS_DI && S.work === 'all' ? [{ k: 'ty', t: 'งาน', v: x => WORKS[x.ty], dir: 'text' }] : []), { k: 'dc', t: 'DC', v: x => dcName(x.dc), dir: 'text', txt: x => dcName(x.dc) + (x.dcs.length > 1 ? ` +${x.dcs.length - 1}` : '') }, { k: 'g', t: 'กลุ่ม', v: x => x.g, dir: 'text', html: x => x.gs.map(gtag).join(' ') }, { k: 'route', t: 'เส้นทางหลัก', v: x => x.routeTop, dir: 'text', txt: x => x.routeTop + (x.routeN > 1 ? ` (+${x.routeN - 1})` : '') },
     ...aggCols().filter(c => ['trips', 'points', 'revenue', 'cost', 'pct'].includes(c.k)),
     { k: 'cpt', t: 'ค่าจ้าง/เที่ยว', v: x => x.costPerTrip, txt: x => fmtN(x.costPerTrip), cls: x => x.anomaly ? 'p-bad' : '' }, { k: 'med', t: 'มัธยฐาน DC+กลุ่ม', v: x => x.medianCostPerTrip, txt: x => fmtN(x.medianCostPerTrip) }, { k: 'st', t: 'สถานะ', v: x => x.anomaly ? 1 : 0, html: x => x.anomaly ? '<span class="tag">ผิดปกติ</span>' : '<span class="tag mut">ปกติ</span>' }];
   return `${header('ทะเบียนรถ', esc(rangeLabel()) + ' · ' + esc(scopeText()))}
@@ -587,7 +639,9 @@ document.addEventListener('click', e => {
   if (a === 'ddall') { const any = DCS.some(c => S.open['dc' + c]); DCS.forEach(c => S.open['dc' + c] = !any); render(true); return; }
   if (a === 'routes') { S.showRoutes = v === '1'; if (S.showRoutes) DCS.forEach(c => S.open['dc' + c] = true); render(true); return; }
   if (a === 'allact') { S.allAct = !S.allAct; render(true); return; }
-  if (a === 'group') S.group = v;
+  if (a === 'work') S.work = v;
+  else if (a === 'calc') { S.calc = v; C.applyCalc(D, S.calc); }
+  else if (a === 'group') S.group = v;
   else if (a === 'mode') setMode(v);
   else if (a === 'trip') S.trip = v;
   else if (a === 'vf') S.vf = v;
@@ -622,5 +676,5 @@ document.getElementById('ov').addEventListener('click', e => { if (e.target.id =
 let rt, lastW = innerWidth; addEventListener('resize', () => { if (innerWidth === lastW) return; lastW = innerWidth; clearTimeout(rt); rt = setTimeout(() => render(true), 200); });
 matchMedia('(prefers-color-scheme:dark)').addEventListener('change', () => render(true));
 
-window.NX = { statData, UNIT, emptyNote, dcGroupData, dcBars, dcBarsH, trendSpec, trendChart, shortDc, wkDate, addDays, dtOf, S, D, RAW, C, filt, between, kpiData, extraStats, prevRange, curRange, rangeLabel, scopeText, dcAgg, routeAgg, vehAgg, cmpRows, analysisRows, execBullets, dailySeries, splitParts, lineChart, hbars, donut, trendSvg, LIGHT, MET, AMET, ADIM, GROUPS, TRIPS, GNAME, GCOL, esc, fmtN, fmtP, fmtK, mLabel, dLabel, dcName, DCS, MONTHS, DAYS, LAST, render, openSheet, closeSheet, VIEW, table, header, pc, excessOf, dataNote };
+window.NX = { HAS_DI, WORKS, CALCS, workText, gradeOf, statData, UNIT, emptyNote, dcGroupData, dcBars, dcBarsH, trendSpec, trendChart, shortDc, wkDate, addDays, dtOf, S, D, RAW, C, filt, between, kpiData, extraStats, prevRange, curRange, rangeLabel, scopeText, dcAgg, routeAgg, vehAgg, cmpRows, analysisRows, execBullets, dailySeries, splitParts, lineChart, hbars, donut, trendSvg, LIGHT, MET, AMET, ADIM, GROUPS, TRIPS, GNAME, GCOL, esc, fmtN, fmtP, fmtK, mLabel, dLabel, dcName, DCS, MONTHS, DAYS, LAST, render, openSheet, closeSheet, VIEW, table, header, pc, excessOf, dataNote };
 render();

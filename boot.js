@@ -28,7 +28,7 @@ function askKey(err) {
   document.getElementById('adm-key').focus();
 }
 function loadScript(src) { return new Promise((res, rej) => { const s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = () => rej(new Error(src)); document.body.appendChild(s); }); }
-const FIELDS = ['i', 'dc', 'dn', 'dt', 'pl', 'g', 'rc', 'rd', 'rty', 'bl', 'bx', 'rv', 'co', 'pt'];
+const FIELDS = ['i', 'dc', 'dn', 'dt', 'pl', 'g', 'rc', 'rd', 'rty', 'bl', 'bx', 'rv', 'co', 'pt', 'ty'];
 /* รับได้ทั้งรูปแบบใหม่ (rows เป็นอาร์เรย์) และรูปแบบ Code.gs เดิม (rows เป็นอ็อบเจ็กต์) */
 function normRows(j) {
   const cols = j.cols || FIELDS, num = { bl: 1, bx: 1, rv: 1, co: 1, pt: 1 };
@@ -36,6 +36,7 @@ function normRows(j) {
     const o = {};
     if (Array.isArray(r)) cols.forEach((k, i) => { o[k] = r[i]; }); else Object.assign(o, r);
     FIELDS.forEach(k => { o[k] = num[k] ? (Number(o[k]) || 0) : String(o[k] == null ? '' : o[k]).trim(); });
+    o.ty = o.ty === 'DI' ? 'DI' : 'IN';   // ข้อมูลเดิมไม่มีประเภท = เข้ารับอย่างเดียว
     return o;
   }).filter(o => o.i);
 }

@@ -4,8 +4,8 @@
 (function () {
 const { S, D, RAW, C, esc, fmtN, fmtP, mLabel, dLabel, dcName, render, openSheet, VIEW, header, pc, LIGHT, MET, GNAME, GCOL, GROUPS, TRIPS } = window.NX;
 const $ = s => document.querySelector(s);
-const FIELDS = ['i', 'dc', 'dn', 'dt', 'pl', 'g', 'rc', 'rd', 'rty', 'bl', 'bx', 'rv', 'co', 'pt'];
-const HEAD_TH = ['เลขที่ใบรายการ', 'DC', 'ชื่อ DC', 'วันที่ (พ.ศ.)', 'ทะเบียนรถ', 'กลุ่ม (AB/CC)', 'รหัสเส้นทาง', 'เส้นทาง', 'ประเภทอัตรา', 'บิล', 'กล่อง', 'รายได้', 'ค่าจ้าง (จริง)', 'จุดเข้ารับ'];
+const FIELDS = ['i', 'dc', 'dn', 'dt', 'pl', 'g', 'rc', 'rd', 'rty', 'bl', 'bx', 'rv', 'co', 'pt', 'ty'];
+const HEAD_TH = ['เลขที่ใบรายการ', 'DC', 'ชื่อ DC', 'วันที่ (พ.ศ.)', 'ทะเบียนรถ', 'กลุ่ม (AB/CC)', 'รหัสเส้นทาง', 'เส้นทาง', 'ประเภทอัตรา', 'บิล', 'กล่อง', 'รายได้', 'ค่าจ้าง (จริง)', 'จุดเข้ารับ', 'งาน (IN/DI)'];
 let LOGO = 'logo.png';
 fetch('logo.png').then(r => r.blob()).then(b => new Promise(res => { const f = new FileReader(); f.onload = () => res(f.result); f.readAsDataURL(b); })).then(u => { LOGO = u; }).catch(() => {});
 
@@ -26,9 +26,9 @@ async function readFiles(list) {
   }
   const have = new Map(RAW.map(r => [r.i, r])), add = [], upd = [], same = [];
   recs.forEach(r => { const o = have.get(r.i); if (!o) add.push(r); else if (sameRow(o, r)) same.push(r); else upd.push(r); });
-  const merged = C.mergeRecords(RAW, recs), DM = C.buildDerived(merged), months = [...new Set(C.buildDerived(recs).map(r => r.mKey))].sort();
+  const merged = C.mergeRecords(RAW, recs), DM = C.applyCalc(C.buildDerived(merged), window.NX.S.calc), months = [...new Set(C.buildDerived(recs).map(r => r.mKey))].sort();
   const per = months.map(m => { const inFile = recs.filter(r => C.monthKeyOf(C.parseThaiDate(r.dt)) === m); const A = C.aggregate(C.getFiltered(DM, { month: m })).total; return { m, file: inFile.length, add: inFile.filter(r => !have.has(r.i)).length, upd: inFile.filter(r => have.has(r.i) && !sameRow(have.get(r.i), r)).length, A }; });
-  SET.plan = { recs, add, upd, same, per, bad, used, total: merged.length, zeroCost: recs.filter(r => !(r.co > 0)).length, zeroRev: recs.filter(r => !(r.rv > 0)).length };
+  SET.plan = { recs, add, upd, same, per, bad, used, total: merged.length, zeroCost: recs.filter(r => !(r.co > 0)).length, zeroRev: recs.filter(r => !(r.rv > 0)).length, nIN: recs.filter(r => r.ty !== 'DI').length, nDI: recs.filter(r => r.ty === 'DI').length, needDeploy: (window.DATA.apiV || 1) < 3 && recs.some(r => r.ty === 'DI') };
   SET.msg = ''; renderSet();
 }
 function planHtml() {
@@ -36,10 +36,11 @@ function planHtml() {
   if (!p.recs.length) return `<p class="badt">ไม่พบรายการเข้ารับในไฟล์ ${p.bad.map(esc).join(', ')} (ต้องเป็นรายงาน NIMEX06006)</p>`;
   return `<div class="tw"><table class="t"><thead><tr><th>เดือน</th><th>ใบงานในไฟล์</th><th>ใหม่</th><th>แทนที่</th><th>เที่ยวหลังบันทึก</th><th>รายได้</th><th>ค่าจ้าง</th><th>% ค่าจ้าง</th></tr></thead><tbody>${p.per.map(x => `<tr><td>${esc(mLabel(x.m))}</td><td>${fmtN(x.file)}</td><td>${fmtN(x.add)}</td><td>${fmtN(x.upd)}</td><td>${fmtN(x.A.trips)}</td><td>${fmtN(x.A.revenue)}</td><td>${fmtN(x.A.cost)}</td><td class="p-${pc(x.A.pct)}">${fmtP(x.A.pct)}</td></tr>`).join('')}</tbody></table></div>
   <p class="note" style="text-align:left">เพิ่มใหม่ ${fmtN(p.add.length)} · แทนที่ด้วยค่าใหม่ ${fmtN(p.upd.length)} · เหมือนเดิม ${fmtN(p.same.length)} (ไม่ส่งซ้ำ) · หลังบันทึกมีทั้งหมด ${fmtN(p.total)} ใบงาน<br>ในไฟล์: ค่าจ้างเป็น 0 ${fmtN(p.zeroCost)} ใบงาน (จะใช้ค่าประมาณการ) · ไม่มีรายได้ ${fmtN(p.zeroRev)} ใบงาน${p.bad.length ? `<br><span class="badt">ไม่พบข้อมูลเข้ารับในไฟล์: ${p.bad.map(esc).join(', ')}</span>` : ''}</p>
-  ${p.add.length + p.upd.length ? `<button class="btn" data-set="commit"${SET.busy ? ' disabled' : ''}>บันทึกลงระบบ ${fmtN(p.add.length + p.upd.length)} ใบงาน</button>` : '<p class="note">ไม่มีข้อมูลใหม่ที่ต้องบันทึก</p>'}`;
+  <p class="note" style="text-align:left">งาน: เข้ารับอย่างเดียว ${fmtN(p.nIN)} ใบ · เข้ารับในสาย ${fmtN(p.nDI)} ใบ (นับเฉพาะใบกระจายที่มีงานเข้ารับ)</p>
+  ${p.needDeploy ? '<p class="badt">ไฟล์นี้มีงานเข้ารับในสาย แต่ระบบข้อมูลยังเป็น Code.gs รุ่นเก่า ให้วาง Code.gs.txt ใหม่และ Deploy เป็น New version ก่อนบันทึก</p>' : p.add.length + p.upd.length ? `<button class="btn" data-set="commit"${SET.busy ? ' disabled' : ''}>บันทึกลงระบบ ${fmtN(p.add.length + p.upd.length)} ใบงาน</button>` : '<p class="note">ไม่มีข้อมูลใหม่ที่ต้องบันทึก</p>'}`;
 }
 async function commit() {
-  const p = SET.plan; if (!p || SET.busy) return; SET.busy = true;
+  const p = SET.plan; if (!p || SET.busy || p.needDeploy) return; SET.busy = true;
   const rows = [...p.add, ...p.upd].map(r => FIELDS.map(k => r[k])), N = 4000;
   try {
     for (let i = 0; i < rows.length; i += N) { SET.msg = `กำลังบันทึก ${fmtN(Math.min(i + N, rows.length))} / ${fmtN(rows.length)} ใบงาน…`; renderSet(); await api({ a: 'upsert', rows: rows.slice(i, i + N) }); }
@@ -59,7 +60,7 @@ function checks() {
   return { multiDc, L, noRev: D.filter(r => !(r.rv > 0)).length, est: D.filter(r => r.isEstimated).length, noCost: D.filter(r => !(r.co > 0) && !(r.effCost > 0)).length };
 }
 VIEW.settings = () => {
-  const M = monthsInfo(), K = checks(), old = (window.DATA.apiV || 1) < 2;
+  const M = monthsInfo(), K = checks(), old = (window.DATA.apiV || 1) < 3;
   return `${header('ตั้งค่า', 'เห็นเฉพาะผู้ดูแลระบบ')}
   <section class="card"><h2>สถานะระบบข้อมูล</h2><div class="kv" style="justify-content:center"><span>ใบงานในระบบ</span><b>${fmtN(RAW.length)}</b><span>เดือน</span><b>${M.map(x => esc(mLabel(x.m))).join(', ') || '–'}</b><span>โหลดเมื่อ</span><b>${new Date().toLocaleString('th-TH')}</b></div>${old ? '<p class="badt" style="text-align:center">ระบบข้อมูลยังเป็น Code.gs รุ่นเก่า ให้วาง Code.gs.txt ใหม่และ Deploy เป็น New version</p>' : ''}<div class="btnrow" style="margin-top:8px"><button class="btn alt" data-set="reload">โหลดข้อมูลใหม่</button><button class="btn" data-act="export">แชร์และส่งออก</button></div></section>
   <section class="card"><h2>เติมไฟล์</h2><p class="note">เลือกรายงาน NIMEX06006 (.xlsx) ได้หลายไฟล์ ระบบอ่านในเบราว์เซอร์ แสดงผลให้ตรวจก่อนบันทึก เลขที่ใบรายการซ้ำจะยึดค่าใหม่</p><input type="file" id="up-file" multiple accept=".xlsx,.xls" aria-label="เลือกไฟล์รายงาน"><div id="set-up" class="plan" style="margin-top:8px">${SET.msg ? `<p class="msg">${esc(SET.msg)}</p>` : ''}${planHtml()}</div></section>
@@ -91,7 +92,7 @@ const picked = new Set(['kpi', 'trend', 'split', 'dc']); let touched = false;
 const MD = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];
 const KE = { revenue: '💵', cost: '👷', pct: '🎯', points: '📍', trips: '🚚', bills: '🧾', boxes: '📦', avgPoints: '📊' };
 const NX = window.NX;
-const groupLine = () => GROUPS[S.group] + (S.trip !== 'all' ? ' · ' + TRIPS[S.trip] : '');
+const groupLine = () => GROUPS[S.group] + (S.trip !== 'all' ? ' · ' + TRIPS[S.trip] : '') + (NX.HAS_DI ? ' · ' + (S.work === 'all' ? 'รวม 2 งาน' : NX.WORKS[S.work]) + (S.work !== 'IN' ? ' (' + NX.CALCS[S.calc] + ')' : '') : '');
 const overRoutes = rows => NX.routeAgg(rows).filter(r => r.agg.pct !== null && r.agg.pct > C.SETTINGS.kpi).sort((a, b) => b.excess - a.excess);
 const badCars = rows => NX.vehAgg(rows).filter(v => v.anomaly).sort((a, b) => b.costPerTrip / b.medianCostPerTrip - a.costPerTrip / a.medianCostPerTrip);
 function summaryText() {
