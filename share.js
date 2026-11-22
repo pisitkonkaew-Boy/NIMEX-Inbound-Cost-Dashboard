@@ -6,7 +6,7 @@
 'use strict';
 (function () {
 const NX = window.NX, C = NX.C, S = NX.S, { esc, fmtN, fmtP } = NX, A = () => window.NXA;
-const LS = 'nimShareCfg';
+const LS = 'nimShareCfg2';
 
 /* ---------- เกรด ---------- */
 const GR = ['A', 'B', 'C', 'D', 'E', 'F'], GRC = ['#1d57b8', '#2f8f8f', '#b8860b', '#d9822b', '#c4563a', '#b8334a'];
@@ -30,11 +30,16 @@ const BW_KEYS = ['pct', 'cpt', 'cpb', 'cpx', 'avgPoints'];
 const LEVELS = { dc: 'DC', route: 'เส้นทาง', veh: 'ทะเบียนรถ' };
 
 /* ---------- ค่าที่ผู้ใช้เลือกไว้ (จำในเบราว์เซอร์เครื่องนี้) ---------- */
-const DEF = { level: 'dc', n: 5, slots: ['dc:pct', 'trend:pct', 'dc:cpt', 'donut'] };
+/* กราฟ 4 ด้านเริ่มต้นตามสกิล: (1) แท่งแนวนอนตามกลุ่ม AB/CC (แยกงาน) พร้อมจำนวนเที่ยว (2) แท่งคู่ราย DC เทียบ AB/CC
+   (3) แท่งคู่ราย DC ของ 2 ตัวชี้วัดที่เกี่ยวข้องกัน (รายได้ เทียบ ค่าจ้าง) (4) โดนัทสัดส่วนเกรด + แย่สุด 3 อันดับ */
+const DEF = { level: 'dc', n: 5, slots: ['grp:pct', 'dc:pct', 'pair:revcost', 'donut'] };
 let CFG = Object.assign({}, DEF);
 try { const j = JSON.parse(localStorage.getItem(LS) || 'null'); if (j) CFG = Object.assign({}, DEF, j); } catch (e) {}
 const saveCfg = () => { try { localStorage.setItem(LS, JSON.stringify(CFG)); } catch (e) {} };
 const CHART_OPTS = [
+  ...['pct', 'cpt', 'cpb', 'cpx', 'avgPoints'].map(m => ['grp:' + m, 'แท่งแนวนอน ตามกลุ่ม AB/CC พร้อมจำนวนเที่ยว · ' + BWM[m].t]),
+  ['pair:revcost', 'แท่งคู่ ราย DC · รายได้ เทียบ ค่าจ้าง'],
+  ['pair:billbox', 'แท่งคู่ ราย DC · ค่าจ้างต่อบิล เทียบ ค่าจ้างต่อชิ้น'],
   ...['pct', 'cpt', 'cpb', 'cpx', 'revenue', 'cost', 'trips', 'avgPoints'].map(m => ['dc:' + m, 'แท่ง ราย DC แยก AB/CC · ' + BWM[m].t]),
   ...['pct', 'cpt', 'cpb', 'cpx', 'revenue', 'cost', 'trips', 'avgPoints'].map(m => ['trend:' + m, 'เส้นรายวัน · ' + BWM[m].t]),
   ['donut', 'โดนัทสัดส่วนเกรดเส้นทาง + เส้นทางแย่สุด 3 อันดับ']
@@ -95,7 +100,7 @@ document.addEventListener('change', e => {
 });
 
 /* ---------- วาดกราฟสำหรับอินโฟกราฟิก 16:9 ---------- */
-const INK = '#0b1f3f', MUT = '#55657f', LINE = '#dbe3f0', GCOLS = { T: '#000000', AB: '#c2410c', CC: '#1e3a8a' };
+const INK = '#0b1f3f', MUT = '#55657f', LINE = '#dbe3f0', GCOLS = { T: '#0b1f3f', AB: '#b8860b', CC: '#1d57b8' };
 const niceStep = r => { const p = Math.pow(10, Math.floor(Math.log10(r || 1))), f = r / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; };
 /* แกน: ค่าอยู่ช่วงแคบ (ห่างกัน <25% ของค่าสูงสุด) และไม่มีเส้น KPI → ไม่เริ่มที่ 0 แล้วเขียนกำกับ */
 function axisOf(vals, ref, M) {
@@ -111,15 +116,16 @@ function yAxis(ax, M, m, iw, ih) { return ax.ticks.map(t => { const y = m.t + ih
 
 function dcBarsChart(mid, w, h) {
   const M = BWM[mid], rows = NX.filt({ dc: 'all' }), gs = S.group === 'all' ? ['AB', 'CC'] : [S.group];
-  const data = NX.DCS.map(dc => ({ short: NX.shortDc(dc), g: gs.map(g => { const a = C.aggregate(rows.filter(r => r.dc === dc && r.g === g)).total; return { g, n: a.trips, v: a.trips ? M.f(a) : NaN }; }) }));
+  const data = NX.DCS.map(dc => ({ dc, short: NX.shortDc(dc), g: gs.map(g => { const a = C.aggregate(rows.filter(r => r.dc === dc && r.g === g)).total; return { g, n: a.trips, v: a.trips ? M.f(a) : NaN }; }) }));
   const vals = data.flatMap(d => d.g.map(x => x.v)), ref = mid === 'pct' ? C.SETTINGS.kpi : 0, ax = axisOf(vals, ref, M);
   if (!ax) return { svg: empty(w, h, 'ไม่มีข้อมูลในตัวกรองนี้'), note: '' };
   const m = { l: 62, r: 12, t: 34, b: 58 }, iw = w - m.l - m.r, ih = h - m.t - m.b, cw = iw / data.length, bw = Math.min(78, cw * .3), Y = v => m.t + ih * (1 - (Math.max(v, ax.lo) - ax.lo) / (ax.hi - ax.lo));
   let s = legend(gs.map(g => [GCOLS[g], g === 'AB' ? 'AB แห้ง' : 'CC เย็น']).concat(ref ? [['#b8334a', 'KPI ' + fmtN(ref, 2) + '%', 1]] : []), m.l, 12) + yAxis(ax, M, m, iw, ih);
   data.forEach((d, i) => {
     const cx = m.l + cw * (i + .5), n = d.g.length, x0 = cx - (n * bw + (n - 1) * 10) / 2;
-    d.g.forEach((x, j) => { const bx = x0 + j * (bw + 10); if (Number.isFinite(x.v)) { const y = Y(x.v); s += `<rect x="${bx}" y="${y}" width="${bw}" height="${m.t + ih - y}" rx="5" fill="${GCOLS[x.g]}"/><text x="${bx + bw / 2}" y="${y - 6}" text-anchor="middle" font-size="15" font-weight="600" fill="${INK}">${esc(M.x(x.v))}</text>`; } else s += `<text x="${bx + bw / 2}" y="${m.t + ih - 8}" text-anchor="middle" font-size="12.5" fill="${MUT}">ไม่มีเที่ยว</text>`; });
-    s += `<text x="${cx}" y="${m.t + ih + 22}" text-anchor="middle" font-size="15" font-weight="600" fill="${INK}">${esc(d.short)}</text><text x="${cx}" y="${m.t + ih + 42}" text-anchor="middle" font-size="12.5" fill="${MUT}">${esc(d.g.map(x => x.g + ' ' + fmtN(x.n) + ' เที่ยว').join(' · '))}</text>`;
+    s += `<g${S.dc !== 'all' && S.dc !== d.dc ? ' opacity=".35"' : ''}>`;
+    d.g.forEach((x, j) => { const bx = x0 + j * (bw + 10); if (Number.isFinite(x.v)) { const y = Y(x.v); s += `<rect x="${bx}" y="${y}" width="${bw}" height="${m.t + ih - y}" rx="5" fill="${GCOLS[x.g]}"/><text x="${bx + bw / 2}" y="${y - 6}" text-anchor="middle" font-size="15" font-weight="600" fill="${INK}">${esc(M.x(x.v))}</text>`; } else { const t = NX.emptyNote(d.dc, x.g), sp = t.indexOf(' '), two = t !== 'ไม่มีงาน' && sp > 0; s += two ? `<text x="${bx + bw / 2}" y="${m.t + ih - 26}" text-anchor="middle" font-size="12.5" fill="${MUT}">${esc(t.slice(0, sp))}</text><text x="${bx + bw / 2}" y="${m.t + ih - 9}" text-anchor="middle" font-size="12.5" fill="${MUT}">${esc(t.slice(sp + 1))}</text>` : `<text x="${bx + bw / 2}" y="${m.t + ih - 8}" text-anchor="middle" font-size="12.5" fill="${MUT}">ไม่มีเที่ยว</text>`; } });
+    s += `<text x="${cx}" y="${m.t + ih + 22}" text-anchor="middle" font-size="15" font-weight="600" fill="${INK}">${esc(d.short)}</text><text x="${cx}" y="${m.t + ih + 42}" text-anchor="middle" font-size="12.5" fill="${MUT}">${esc(d.g.map(x => x.g + ' ' + fmtN(x.n) + ' เที่ยว').join(' · '))}</text></g>`;
   });
   if (ref) s += `<line x1="${m.l}" x2="${m.l + iw}" y1="${Y(ref)}" y2="${Y(ref)}" stroke="#b8334a" stroke-width="2.2" stroke-dasharray="6 4"/>`;
   return { svg: s, note: ax.note };
@@ -160,9 +166,47 @@ function donutChart(w, h) {
   if (!W3.length) s += `<text x="${lx}" y="${ly + 24}" font-size="14" fill="${MUT}">ไม่มีเส้นทางที่มี 2 เที่ยวขึ้นไป</text>`;
   return { svg: s, note: gradeNote() };
 }
+/* (1) แท่งแนวนอนตามกลุ่ม: กรองตาม DC ที่เลือก แสดงจำนวนเที่ยวกำกับทุกแท่ง */
+function groupHBars(mid, w, h) {
+  const M = BWM[mid], rows = NX.filt(), gs = S.group === 'all' ? ['AB', 'CC'] : [S.group], byTy = NX.HAS_DI && S.work === 'all', ref = mid === 'pct' ? C.SETTINGS.kpi : 0;
+  const items = [{ l: 'รวม', g: 'T', a: C.aggregate(rows).total }];
+  gs.forEach(g => { const rg = rows.filter(r => r.g === g); if (byTy) ['IN', 'DI'].forEach(t => items.push({ l: (g === 'AB' ? 'AB แห้ง' : 'CC เย็น') + ' · ' + NX.WORKS[t], g, a: C.aggregate(rg.filter(r => r.ty === t)).total })); else items.push({ l: g === 'AB' ? 'AB แห้ง' : 'CC เย็น', g, a: C.aggregate(rg).total }); });
+  items.forEach(it => { it.v = it.a.trips ? M.f(it.a) : NaN; });
+  const ax = axisOf(items.map(i => i.v), ref, M); if (!ax) return { svg: empty(w, h, 'ไม่มีข้อมูลในตัวกรองนี้'), note: '' };
+  const m = { l: byTy ? 250 : 130, r: 230, t: 34, b: 28 }, iw = w - m.l - m.r, ih = h - m.t - m.b, rh = Math.min(64, ih / items.length), bh = Math.min(30, rh * .56), X = v => m.l + iw * (Math.max(v, ax.lo) - ax.lo) / (ax.hi - ax.lo), y0 = m.t + (ih - rh * items.length) / 2;
+  let s = legend(gs.map(g => [GCOLS[g], g === 'AB' ? 'AB แห้ง' : 'CC เย็น']).concat([[GCOLS.T, 'รวม']]).concat(ref ? [['#b8334a', 'KPI ' + fmtN(ref, 2) + '%', 1]] : []), m.l, 12);
+  ax.ticks.forEach(t => { s += `<line x1="${X(t)}" x2="${X(t)}" y1="${m.t}" y2="${m.t + ih}" stroke="${LINE}"/><text x="${X(t)}" y="${m.t + ih + 18}" text-anchor="middle" font-size="12.5" fill="${MUT}">${esc(M.ax(t))}</text>`; });
+  items.forEach((it, i) => {
+    const y = y0 + i * rh + (rh - bh) / 2, cy = y + bh / 2 + 5, over = ref && it.v > ref, gr = mid === 'pct' && it.a.trips ? grade(it.v) : '';
+    s += `<text x="${m.l - 12}" y="${cy}" text-anchor="end" font-size="15" font-weight="${it.g === 'T' ? 700 : 600}" fill="${it.g === 'T' ? INK : GCOLS[it.g]}">${esc(it.l)}</text>`;
+    if (!it.a.trips) { const note = it.g !== 'T' && S.dc !== 'all' ? NX.emptyNote(S.dc, it.g) : 'ไม่มีเที่ยว'; s += `<text x="${m.l + 8}" y="${cy}" font-size="13.5" fill="${MUT}">${esc(note === 'ไม่มีงาน' ? 'ไม่มีเที่ยว' : note)}</text>`; return; }
+    s += `<rect x="${m.l}" y="${y}" width="${Math.max(3, X(it.v) - m.l)}" height="${bh}" rx="6" fill="${GCOLS[it.g]}"${over ? ' stroke="#b8334a" stroke-width="3"' : ''}/>`;
+    s += `<text x="${w - m.r + 12}" y="${cy}" font-size="17" font-weight="700" fill="${over ? '#b8334a' : INK}">${esc(M.x(it.v))}</text><text x="${w - m.r + 104}" y="${cy}" font-size="13.5" fill="${MUT}">${fmtN(it.a.trips)} เที่ยว</text>`;
+    if (gr) s += `<rect x="${w - 34}" y="${cy - 18}" width="28" height="24" rx="6" fill="${gradeCol(gr)}"/><text x="${w - 20}" y="${cy}" text-anchor="middle" font-size="15" font-weight="700" fill="#fff">${gr}</text>`;
+  });
+  if (ref) s += `<line x1="${X(ref)}" x2="${X(ref)}" y1="${m.t}" y2="${m.t + ih}" stroke="#b8334a" stroke-width="2.2" stroke-dasharray="6 4"/>`;
+  return { svg: s, note: (ax.note ? ax.note + ' · ' : '') + (S.dc === 'all' ? 'ทุก DC' : NX.shortDc(S.dc)) };
+}
+/* (3) แท่งคู่ราย DC ของ 2 ตัวชี้วัดที่เกี่ยวข้องกัน: แสดงครบทุก DC เพื่อเทียบ (DC ที่เลือกเด่น) */
+const PAIRS = { revcost: { t: 'ราย DC · รายได้ เทียบ ค่าจ้าง', a: 'revenue', b: 'cost', ca: '#1d57b8', cb: '#b8334a', ax: v => NX.fmtK(v), sub: a => '% ค่าจ้าง ' + fmtP(a.pct) }, billbox: { t: 'ราย DC · ค่าจ้างต่อบิล เทียบ ค่าจ้างต่อชิ้น', a: 'cpb', b: 'cpx', ca: '#2f8f8f', cb: '#6e93d6', ax: v => fmtN(v, 0), sub: a => 'ค่าจ้างต่อเที่ยว ' + fmtN(a.trips ? a.cost / a.trips : 0) } };
+function pairChart(id, w, h) {
+  const Pq = PAIRS[id], MA = BWM[Pq.a], MB = BWM[Pq.b], rows = NX.filt({ dc: 'all' });
+  const data = NX.DCS.map(dc => { const a = C.aggregate(rows.filter(r => r.dc === dc)).total; return { dc, short: NX.shortDc(dc), a, va: a.trips ? MA.f(a) : NaN, vb: a.trips ? MB.f(a) : NaN }; });
+  const ax = axisOf(data.flatMap(d => [d.va, d.vb]), 0, { ax: Pq.ax }); if (!ax) return { svg: empty(w, h, 'ไม่มีข้อมูลในตัวกรองนี้'), note: '' };
+  const m = { l: 62, r: 12, t: 34, b: 58 }, iw = w - m.l - m.r, ih = h - m.t - m.b, cw = iw / data.length, bw = Math.min(84, cw * .3), Y = v => m.t + ih * (1 - (Math.max(v, ax.lo) - ax.lo) / (ax.hi - ax.lo));
+  let s = legend([[Pq.ca, MA.t.replace(' (บาท)', '')], [Pq.cb, MB.t.replace(' (บาท)', '')]], m.l, 12) + yAxis(ax, { ax: Pq.ax }, m, iw, ih);
+  data.forEach((d, i) => {
+    const cx = m.l + cw * (i + .5); s += `<g${S.dc !== 'all' && S.dc !== d.dc ? ' opacity=".35"' : ''}>`;
+    [[d.va, Pq.ca, MA], [d.vb, Pq.cb, MB]].forEach(([v, c, M], j) => { const bx = cx + (j ? 5 : -5 - bw); if (!Number.isFinite(v)) return; const y = Y(v); s += `<rect x="${bx}" y="${y}" width="${bw}" height="${m.t + ih - y}" rx="5" fill="${c}"/><text x="${bx + bw / 2}" y="${y - 6}" text-anchor="middle" font-size="14.5" font-weight="600" fill="${INK}">${esc(Pq.a === 'revenue' ? NX.fmtK(v) : M.x(v))}</text>`; });
+    s += `<text x="${cx}" y="${m.t + ih + 22}" text-anchor="middle" font-size="15" font-weight="600" fill="${INK}">${esc(d.short)}</text><text x="${cx}" y="${m.t + ih + 42}" text-anchor="middle" font-size="12.5" fill="${d.a.pct > C.SETTINGS.kpi && Pq.a === 'revenue' ? '#b8334a' : MUT}">${esc(Pq.sub(d.a) + ' · ' + fmtN(d.a.trips) + ' เที่ยว')}</text></g>`;
+  });
+  return { svg: s, note: ax.note };
+}
 function chartFor(spec, w, h) {
   const [k, m] = spec.split(':');
-  if (k === 'dc') return { t: 'แท่ง ราย DC แยก AB/CC · ' + BWM[m].t, ...dcBarsChart(m, w, h) };
+  if (k === 'grp') return { t: 'ตามกลุ่ม AB / CC · ' + BWM[m].t, ...groupHBars(m, w, h) };
+  if (k === 'pair') return { t: PAIRS[m].t, ...pairChart(m, w, h) };
+  if (k === 'dc') return { t: 'ราย DC แยก AB / CC · ' + BWM[m].t, ...dcBarsChart(m, w, h) };
   if (k === 'trend') return { t: 'รายวัน · ' + BWM[m].t, ...trendChart(m, w, h) };
   return { t: 'สัดส่วนเกรดเส้นทาง (% ค่าจ้าง)', ...donutChart(w, h) };
 }
@@ -174,8 +218,8 @@ function info169() {
   const dtext = (d, prev) => d ? ((d.dir > 0 ? '▲ ' : d.dir < 0 ? '▼ ' : '') + (d.text || 'เท่าเดิม') + (prev ? ' · ก่อนหน้า ' + prev : '')) : 'ไม่มีช่วงก่อนหน้า';
   const byId = id => K.list.find(k => k.id === id), U = id => St.units.find(u => u.id === id), tp = St.trip, smx = o => fmtN(o.s) + ' / ' + fmtN(o.m);
   const pct = byId('pct'), cards = [
-    { l: '% ค่าจ้างต่อรายได้', v: pct.txt, sub: `KPI ≤ ${fmtN(C.SETTINGS.kpi, 2)}%` + (all ? ` · AB ${fmtP(K.A.AB.pct)} · CC ${fmtP(K.A.CC.pct)}` : ''), d: dtext(pct.d, pct.prev), dc: DCOL(pct.d), grade: grade(K.A.total.pct) },
-    ...['revenue', 'cost'].map(id => { const k = byId(id); return { l: k.l, v: k.txt, sub: 'บาท' + (all ? ` · AB ${fmtN(NX.MET[id].f(K.A.AB))} · CC ${fmtN(NX.MET[id].f(K.A.CC))}` : ''), d: dtext(k.d, k.prev), dc: DCOL(k.d) }; }),
+    { l: '% ค่าจ้างต่อรายได้', v: pct.txt, sub: `KPI ≤ ${fmtN(C.SETTINGS.kpi, 2)}%` + (all ? ` · AB ${K.A.AB.trips ? fmtP(K.A.AB.pct) : '–'} · CC ${K.A.CC.trips ? fmtP(K.A.CC.pct) : '–'}` : ''), d: dtext(pct.d, pct.prev), dc: DCOL(pct.d), grade: grade(K.A.total.pct) },
+    ...['revenue', 'cost'].map(id => { const k = byId(id); return { l: k.l, v: k.txt, sub: 'บาท' + (all ? ` · AB ${K.A.AB.trips ? fmtN(NX.MET[id].f(K.A.AB)) : '–'} · CC ${K.A.CC.trips ? fmtN(NX.MET[id].f(K.A.CC)) : '–'}` : ''), d: dtext(k.d, k.prev), dc: DCOL(k.d) }; }),
     { l: tp.l, v: smx(tp.T), sub: all ? `AB ${smx(tp.AB)} · CC ${smx(tp.CC)}` : 'นับใบงานต่อทะเบียนต่อวัน', d: tp.P ? 'ก่อนหน้า ' + smx(tp.P.T) : 'ไม่มีช่วงก่อนหน้า', dc: '#55657f' },
     ...['cpt', 'cpb'].map(id => { const u = U(id); return { l: u.l, v: u.x(u.T), sub: u.u + (all ? ` · AB ${u.x(u.AB)} · CC ${u.x(u.CC)}` : ''), d: u.dT ? u.dT.t + (Number.isFinite(u.pT) ? ' · ก่อนหน้า ' + u.x(u.pT) : '') : 'ไม่มีช่วงก่อนหน้า', dc: DCOL(u.dT) }; })
   ];
