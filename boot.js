@@ -62,7 +62,7 @@ async function start() {
     await loadScript('nim-calc.js?v=' + v);
     document.getElementById('boot').hidden = true; document.getElementById('app').hidden = false;
     await loadScript('app.js?v=' + v);
-    if (window.ADMIN) { await loadScript('admin.js?v=' + v); await loadScript('share.js?v=' + v); }
+    if (window.ADMIN) { await loadScript('admin.js?v=' + v); await loadScript('share.js?v=' + v); await loadScript('action.js?v=' + v); }
   } catch (e) { bootMsg('<h1>โหลดหน้าเว็บไม่สำเร็จ</h1><p>ลองเปิดหน้านี้ใหม่อีกครั้ง</p>'); }
 }
 start();
