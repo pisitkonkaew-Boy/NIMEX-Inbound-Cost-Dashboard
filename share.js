@@ -91,7 +91,7 @@ function dialogExtra() {
   return `<div class="checks" style="margin-top:6px"><b style="width:100%">ดีสุด/แย่สุด (ตัวชี้วัดละ 1 ช่อง)</b>${BW_KEYS.map(k => `<label><input type="checkbox" data-sec="bw:${k}"${picked.has('bw:' + k) ? ' checked' : ''}> ${esc(BWM[k].t)}</label>`).join('')}</div>
   <div class="fields"><label class="field">จัดอันดับระดับ<select data-nxs="level">${Object.keys(LEVELS).map(k => opt(k, LEVELS[k], CFG.level)).join('')}</select></label><label class="field">แสดงดีสุด/แย่สุดอย่างละ<input type="number" min="1" max="20" step="1" value="${CFG.n}" data-nxs="n"></label></div>
   <details style="margin:6px 0"><summary><b>อินโฟกราฟิก 16:9 — เลือกกราฟ 4 ด้าน</b></summary><div class="fields">${CFG.slots.map((s, i) => `<label class="field">กราฟช่อง ${i + 1}<select data-nxs="slot${i}">${CHART_OPTS.map(([v, t]) => opt(v, t, s)).join('')}</select></label>`).join('')}</div></details>
-  <div class="btns"><button class="btn" data-act="doinfo169" style="background:linear-gradient(180deg,#f0d57a,#d4af37);color:#0a2a5e">อินโฟกราฟิก 16:9 (PNG 4K)</button></div>`;
+  <div class="btns"><button class="btn" data-act="doinfo169" style="background:linear-gradient(180deg,#f0d57a,#d4af37);color:#0a2a5e">อินโฟกราฟิก 16:9 กราฟ 4 ด้าน</button><button class="btn" data-act="doinfo169h" style="background:linear-gradient(180deg,#f0d57a,#d4af37);color:#0a2a5e">อินโฟกราฟิก 16:9 หน้าหลัก</button></div>`;
 }
 document.addEventListener('change', e => {
   const t = e.target, k = t.dataset && t.dataset.nxs; if (!k) return;
@@ -240,7 +240,61 @@ function info169() {
   const footSvg = `<rect y="${H - foot}" width="${W}" height="${foot}" fill="#0a2a5e"/><rect y="${H - foot}" width="${W}" height="3" fill="#d4af37"/><text x="${W / 2}" y="${H - foot / 2 + 5}" text-anchor="middle" font-size="14" fill="#dfe8f7">${esc(ftxt)}</text>`;
   return A_.wrap(W, H, A_.sheetHead(W, head, 'h169') + body + footSvg);
 }
+/* ---------- อินโฟกราฟิก 16:9 หน้าหลัก: KPI 8 การ์ด + กรอบล่าง 4 ช่อง + แยกตามงาน (หรือรายวัน/ราย DC เมื่อมีงานเดียว) ---------- */
+function info169Home() {
+  const PCOL = v => A().PCOL(v);
+  const W = 1920, H = 1080, head = 120, foot = 44, m = 24, g = 14, K = NX.kpiData(), St = NX.statData(K), all = S.group === 'all', byWork = NX.HAS_DI && S.work === 'all', P = NX.LIGHT, A_ = A();
+  const DCOL = d => d ? (d.color === 'good' ? '#1f8a4c' : d.color === 'bad' ? '#b8334a' : '#55657f') : '#55657f';
+  const kw = (W - 2 * m - 7 * g) / 8, kh = 164, y0 = head + 16; let b = '';
+  K.list.forEach((k, i) => {
+    const x = m + i * (kw + g), bar = k.id === 'pct' ? ({ good: '#6e93d6', warn: '#d9822b', bad: '#b8334a' }[k.cls] || '#d4af37') : '#d4af37';
+    const subs = byWork && k.sub2 ? k.sub2.split(' · ') : [k.id === 'pct' ? k.sub.split(' · ')[0] : (all ? k.sub : GROUPS_[S.group])].concat(k.id === 'pct' && all ? [k.sub.split(' · ').slice(1).join(' · ')] : []);
+    const dt = k.dtxt ? k.dtxt + ' · ก่อนหน้า ' + k.prev : 'ไม่มีช่วงก่อนหน้า', fs = k.txt.length > 10 ? 27 : k.txt.length > 8 ? 31 : 36;
+    b += `<g transform="translate(${x} ${y0})"><rect width="${kw}" height="${kh}" rx="14" fill="#0a2a5e"/><rect y="${kh - 5}" width="${kw}" height="5" rx="2.5" fill="${bar}"/><text x="${kw / 2}" y="26" text-anchor="middle" font-size="15" fill="#e6d79c">${esc(k.l)}</text><text x="${k.grade ? kw / 2 - 18 : kw / 2}" y="66" text-anchor="middle" font-size="${fs}" font-weight="700" fill="#fff">${esc(k.txt)}</text><text x="${kw / 2}" y="85" text-anchor="middle" font-size="12" fill="#cfdcf2">${esc(k.id === 'pct' ? '' : k.unit)}</text>`
+      + subs.slice(0, 2).map((t, j) => `<text x="${kw / 2}" y="${(k.id === 'pct' ? 88 : 102) + j * 15}" text-anchor="middle" font-size="11.5" fill="#f0d57a">${esc(t)}</text>`).join('')
+      + `<rect x="10" y="${kh - 38}" width="${kw - 20}" height="26" rx="7" fill="#fff"/><text x="${kw / 2}" y="${kh - 20.5}" text-anchor="middle" font-size="${dt.length > 30 ? 11 : 12.5}" font-weight="600" fill="${DCOL(k.d)}">${esc(dt)}</text>`
+      + (k.grade ? `<rect x="${kw - 58}" y="36" width="42" height="38" rx="9" fill="${gradeCol(k.grade)}"/><text x="${kw - 37}" y="64" text-anchor="middle" font-size="25" font-weight="700" fill="#fff">${k.grade}</text><text x="${kw - 37}" y="86" text-anchor="middle" font-size="11" fill="#cfdcf2">เกรด</text>` : '') + '</g>';
+  });
+  const y1 = y0 + kh + g, sw = (W - 2 * m - 3 * g) / 4, sh = 86, tp = St.trip, smx = o => fmtN(o.s) + ' / ' + fmtN(o.m);
+  const boxes = [{ l: tp.l, v: smx(tp.T), u: '', d: tp.P ? 'ก่อนหน้า ' + smx(tp.P.T) : 'ไม่มีช่วงก่อนหน้า', dc: '#55657f', ab: all ? [`AB ${smx(tp.AB)}`, `CC ${smx(tp.CC)}`] : null },
+    ...St.units.map(u => ({ l: u.l, v: u.x(u.T), u: u.u, d: (u.dT ? u.dT.t + ' · ' : '') + (Number.isFinite(u.pT) ? 'ก่อนหน้า ' + u.x(u.pT) : 'ไม่มีช่วงก่อนหน้า'), dc: DCOL(u.dT), ab: all ? ['AB', 'CC'].map(gg => `${gg} ${u.x(u[gg])}${u['d' + gg] ? ' ' + u['d' + gg].t : ''}`) : null, abc: all ? ['AB', 'CC'].map(gg => DCOL(u['d' + gg])) : null }))];
+  boxes.forEach((o, i) => { const x = m + i * (sw + g); b += `<g transform="translate(${x} ${y1})"><rect width="${sw}" height="${sh}" rx="12" fill="#fff" stroke="#dbe3f0"/><text x="16" y="25" font-size="14" fill="#55657f">${esc(o.l)}</text><text x="16" y="55" font-size="24" font-weight="700" fill="${INK}">${esc(o.v)}${o.u ? `<tspan font-size="13" font-weight="400" fill="#55657f"> ${esc(o.u)}</tspan>` : ''}</text><text x="16" y="76" font-size="13" fill="${o.dc}">${esc(o.d)}</text>`
+    + (o.ab ? o.ab.map((t, j) => `<text x="${sw - 14}" y="${44 + j * 22}" text-anchor="end" font-size="13.5" font-weight="600" fill="${o.abc ? o.abc[j] : '#55657f'}"><tspan fill="${j ? GCOLS.CC : GCOLS.AB}">${t.slice(0, 2)}</tspan>${esc(t.slice(2))}</text>`).join('') : '') + '</g>'; });
+  const y2 = y1 + sh + g + 2, pw = (W - 2 * m - g) / 2, ph = H - foot - 12 - y2;
+  const panel = (x, title, tag, kpiTxt, kpiCls, gr, inner) => `<g transform="translate(${x} ${y2})"><rect width="${pw}" height="${ph}" rx="16" fill="#fff" stroke="#dbe3f0"/><rect x="18" y="16" width="5" height="40" rx="2" fill="#0a2a5e"/><text x="34" y="36" font-size="21" font-weight="700" fill="${INK}">${esc(title)}</text><text x="34" y="56" font-size="12.5" fill="#55657f">${esc(tag)}</text>${kpiTxt ? `<text x="${pw - (gr ? 96 : 20)}" y="46" text-anchor="end" font-size="30" font-weight="700" fill="${kpiCls}">${esc(kpiTxt)}</text>` : ''}${gr ? `<rect x="${pw - 86}" y="24" width="66" height="28" rx="8" fill="${gradeCol(gr)}"/><text x="${pw - 53}" y="44" text-anchor="middle" font-size="15" font-weight="700" fill="#fff">เกรด ${gr}</text>` : ''}${inner}</g>`;
+  const chartIn = (svgStr, top, bottom) => { const iw = pw - 36, e = A_.embed(svgStr, 18, top, iw); return e.s; };
+  const legendRow = (y) => legend((all ? [['T', 'รวม'], ['AB', 'AB แห้ง'], ['CC', 'CC เย็น']] : [[S.group, S.group === 'AB' ? 'AB แห้ง' : 'CC เย็น']]).map(([gg, t]) => [GCOLS[gg], t]).concat([['#b8334a', 'KPI ' + fmtN(C.SETTINGS.kpi, 2) + '%', 1]]), pw / 2 - 150, y);
+  if (byWork) {
+    ['IN', 'DI'].forEach((t, i) => {
+      const rows = K.rows.filter(r => r.ty === t), AA = C.aggregate(rows), T = AA.total, gr = T.trips ? grade(T.pct) : '';
+      const tag = t === 'IN' ? 'ค่าจ้างจริง ÷ รายได้' : S.calc === 'prop' ? 'สัดส่วนจริง: ค่าจ้างคำนวณ ÷ รายได้ค่าขนส่งเข้ารับ' : 'ปกติ: ค่าจ้างจริง ÷ รายได้ค่าขนส่งเข้ารับ';
+      let inner = '';
+      if (!T.trips) inner = `<text x="${pw / 2}" y="${ph / 2}" text-anchor="middle" font-size="18" fill="#55657f">ไม่มีงานในเงื่อนไขนี้</text>`;
+      else {
+        const ms = [[fmtN(T.revenue), 'รายได้'], [fmtN(T.cost), 'ค่าจ้าง'], [fmtN(T.trips), 'เที่ยว'], [fmtN(T.points), 'จุด'], [fmtN(T.avgPoints, 2), 'จุด/เที่ยว'], [fmtN(T.cost / T.trips), 'ค่าจ้าง/เที่ยว']], mw = (pw - 36 - 5 * 10) / 6;
+        ms.forEach(([v, l], j) => { const x = 18 + j * (mw + 10); inner += `<rect x="${x}" y="72" width="${mw}" height="58" rx="10" fill="#f2f5fb"/><text x="${x + mw / 2}" y="98" text-anchor="middle" font-size="18" font-weight="700" fill="${INK}">${esc(v)}</text><text x="${x + mw / 2}" y="119" text-anchor="middle" font-size="12" fill="#55657f">${l}</text>`; });
+        let cy = 142;
+        if (all) { inner += ['AB', 'CC'].map((gg, j) => { const a = AA[gg]; return `<text x="${18 + j * (pw - 36) / 2}" y="${cy + 14}" font-size="13.5" fill="${INK}"><tspan font-weight="700" fill="${GCOLS[gg]}">${gg}</tspan>  ${a.trips ? `รายได้ ${esc(fmtN(a.revenue))} · ค่าจ้าง ${esc(fmtN(a.cost))} · ` : 'ไม่มีงานในช่วงนี้'}${a.trips ? `<tspan font-weight="700" fill="${PCOL(a.pct)}">${esc(fmtP(a.pct))}</tspan>` : ''}</text>`; }).join(''); cy += 26; }
+        inner += `<text x="${pw / 2}" y="${cy + 16}" text-anchor="middle" font-size="15" font-weight="600" fill="#0a2a5e">% ค่าจ้างต่อรายได้ รายวัน (ไม่แสดงวันอาทิตย์)</text>`;
+        const chH = ph - (cy + 28) - 30, svgStr = NX.trendSvg(P, pw - 36, 'pct', NX.trendRows().filter(r => r.ty === t), Math.round(chH));
+        inner += svgStr.startsWith('<svg') ? chartIn(svgStr, cy + 26) : `<text x="${pw / 2}" y="${cy + 80}" text-anchor="middle" font-size="15" fill="#55657f">ไม่มีข้อมูลรายวัน</text>`;
+        inner += legendRow(ph - 16);
+      }
+      b += panel(m + i * (pw + g), NX.WORKS[t], tag, T.trips ? fmtP(T.pct) : '', PCOL(T.pct), gr, inner);
+    });
+    b += `<text x="${m}" y="${y2 - 4}" font-size="0">.</text>`;
+  } else {
+    const tc = NX.trendChart(P, pw - 36, ph - 110), dcb = NX.dcBars(P, pw - 36, ph - 84, false);
+    b += panel(m, tc.T ? tc.T.title : '% ค่าจ้างรายวัน', 'ไม่แสดงวันอาทิตย์' + (tc.T && tc.T.note ? ' · ' + tc.T.note : ''), '', '', '', tc.svg ? chartIn(tc.svg, 76) + legendRow(ph - 16) : `<text x="${pw / 2}" y="${ph / 2}" text-anchor="middle" font-size="18" fill="#55657f">ไม่มีข้อมูลรายวัน</text>`);
+    b += panel(m + pw + g, '% ค่าจ้าง ราย DC แยก AB / CC', K.pr ? 'ลูกศรเทียบ' + K.pr.l.replace(/\s*\(.*\)/, '') : 'ไม่มีช่วงก่อนหน้า', fmtP(K.A.total.pct), PCOL(K.A.total.pct), K.A.total.trips ? grade(K.A.total.pct) : '', chartIn(dcb, 70));
+  }
+  const ftxt = `% ค่าจ้าง = ค่าจ้าง ÷ รายได้ × 100 · KPI ≤ ${fmtN(C.SETTINGS.kpi, 2)}% · ${gradeNote()}` + (byWork ? ' · เข้ารับในสายคิดแบบ' + (NX.CALCS[S.calc] || '') : '') + ' · ผลต่าง: เขียว = ดีขึ้น แดง = แย่ลง' + (K.pr ? ' · เทียบ ' + K.pr.l : '');
+  const footSvg = `<rect y="${H - foot}" width="${W}" height="${foot}" fill="#0a2a5e"/><rect y="${H - foot}" width="${W}" height="3" fill="#d4af37"/><text x="${W / 2}" y="${H - foot / 2 + 5}" text-anchor="middle" font-size="${ftxt.length > 190 ? 12.5 : 14}" fill="#dfe8f7">${esc(ftxt)}</text>`;
+  return A_.wrap(W, H, A_.sheetHead(W, head, 'h169h') + b + footSvg);
+}
+const GROUPS_ = { all: 'รวม AB+CC', AB: 'AB แห้ง', CC: 'CC เย็น' };
+async function exportInfo169Home() { return await A().toPng(info169Home(), 2); }
 async function exportInfo169() { const c = info169(), b = await A().toPng(c, 2); return b; }
 
-window.NXS = { grade, gradeCol, gradeNote, bwRank, bwPiece, bwText, bwSheets, dialogExtra, info169, exportInfo169, cfg: () => CFG, BW_KEYS, BWM, LEVELS };
+window.NXS = { info169Home, exportInfo169Home, grade, gradeCol, gradeNote, bwRank, bwPiece, bwText, bwSheets, dialogExtra, info169, exportInfo169, cfg: () => CFG, BW_KEYS, BWM, LEVELS };
 })();
