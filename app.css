@@ -173,6 +173,7 @@ button.stat{font:inherit;color:inherit;text-align:left;cursor:pointer;width:100%
 td.p-good{background:color-mix(in srgb,var(--good) 12%,var(--panel))}
 td.p-warn{background:color-mix(in srgb,var(--warn) 20%,var(--panel));font-weight:600}
 td.p-bad{background:color-mix(in srgb,var(--bad) 18%,var(--panel));color:var(--bad);font-weight:600}
+td.d-bad{color:var(--bad);font-weight:600;white-space:nowrap}td.d-good{color:var(--good);font-weight:600;white-space:nowrap}td.mut{color:var(--muted)}
 .gtag{display:inline-block;border-radius:6px;padding:0 6px;font-size:12px;font-weight:600;border:1px solid}
 .gtag.AB{color:var(--gAB);border-color:var(--gAB)}.gtag.CC{color:var(--gCC);border-color:var(--gCC)}
 .est{color:var(--warn);font-weight:600;margin-left:3px;cursor:help}

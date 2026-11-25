@@ -11,9 +11,10 @@ const LS = 'nimShareCfg2';
 /* ---------- เกรด ---------- */
 const GR = ['A', 'B', 'C', 'D', 'E', 'F'], GRC = ['#1d57b8', '#2f8f8f', '#b8860b', '#d9822b', '#c4563a', '#b8334a'];
 const bounds = () => ['gA', 'gB', 'gC', 'gD', 'gE'].map(k => +C.SETTINGS[k]);
-function grade(p) { if (p === null || p === undefined || !Number.isFinite(+p)) return '–'; const b = bounds(); for (let i = 0; i < 5; i++) if (p <= b[i]) return GR[i]; return 'F'; }
+const SG = () => +C.SETTINGS.showGrade !== 0;
+function grade(p) { if (!SG()) return ''; if (p === null || p === undefined || !Number.isFinite(+p)) return '–'; const b = bounds(); for (let i = 0; i < 5; i++) if (p <= b[i]) return GR[i]; return 'F'; }
 const gradeCol = g => GRC[GR.indexOf(g)] || '#55657f';
-const gradeNote = () => { const b = bounds(); return `เกรด A ≤${fmtN(b[0], 1)}% · B ≤${fmtN(b[1], 1)}% · C ≤${fmtN(b[2], 1)}% · D ≤${fmtN(b[3], 1)}% · E ≤${fmtN(b[4], 1)}% · F สูงกว่า`; };
+const gradeNote = () => { if (!SG()) return ''; const b = bounds(); return `เกรด A ≤${fmtN(b[0], 1)}% · B ≤${fmtN(b[1], 1)}% · C ≤${fmtN(b[2], 1)}% · D ≤${fmtN(b[3], 1)}% · E ≤${fmtN(b[4], 1)}% · F สูงกว่า`; };
 
 /* ---------- ตัวชี้วัด (ต่ำ = ดี ยกเว้นที่ hi) ---------- */
 const BWM = {
@@ -91,7 +92,7 @@ function dialogExtra() {
   return `<div class="checks" style="margin-top:6px"><b style="width:100%">ดีสุด/แย่สุด (ตัวชี้วัดละ 1 ช่อง)</b>${BW_KEYS.map(k => `<label><input type="checkbox" data-sec="bw:${k}"${picked.has('bw:' + k) ? ' checked' : ''}> ${esc(BWM[k].t)}</label>`).join('')}</div>
   <div class="fields"><label class="field">จัดอันดับระดับ<select data-nxs="level">${Object.keys(LEVELS).map(k => opt(k, LEVELS[k], CFG.level)).join('')}</select></label><label class="field">แสดงดีสุด/แย่สุดอย่างละ<input type="number" min="1" max="20" step="1" value="${CFG.n}" data-nxs="n"></label></div>
   <details style="margin:6px 0"><summary><b>อินโฟกราฟิก 16:9 — เลือกกราฟ 4 ด้าน</b></summary><div class="fields">${CFG.slots.map((s, i) => `<label class="field">กราฟช่อง ${i + 1}<select data-nxs="slot${i}">${CHART_OPTS.map(([v, t]) => opt(v, t, s)).join('')}</select></label>`).join('')}</div></details>
-  <div class="btns"><button class="btn" data-act="doinfo169" style="background:linear-gradient(180deg,#f0d57a,#d4af37);color:#0a2a5e">อินโฟกราฟิก 16:9 กราฟ 4 ด้าน</button><button class="btn" data-act="doinfo169h" style="background:linear-gradient(180deg,#f0d57a,#d4af37);color:#0a2a5e">อินโฟกราฟิก 16:9 หน้าหลัก</button><button class="btn" data-act="doaction169" style="background:#0a2a5e;color:#fff">Action Plan 16:9</button><button class="btn" data-act="dowd169" style="background:#0a2a5e;color:#fff">แยกวันทำการ + แผนเสาร์–อาทิตย์ 16:9</button></div>`;
+  <div class="btns"><button class="btn" data-act="doinfo169" style="background:linear-gradient(180deg,#f0d57a,#d4af37);color:#0a2a5e">อินโฟกราฟิก 16:9 กราฟ 4 ด้าน</button><button class="btn" data-act="doinfo169h" style="background:linear-gradient(180deg,#f0d57a,#d4af37);color:#0a2a5e">อินโฟกราฟิก 16:9 หน้าหลัก</button><button class="btn" data-act="doaction169" style="background:#0a2a5e;color:#fff">Action Plan 16:9</button><button class="btn" data-act="dowd169" style="background:#0a2a5e;color:#fff">แยกวันทำการ 16:9</button></div>`;
 }
 document.addEventListener('change', e => {
   const t = e.target, k = t.dataset && t.dataset.nxs; if (!k) return;
@@ -208,6 +209,7 @@ function chartFor(spec, w, h) {
   if (k === 'pair') return { t: PAIRS[m].t, ...pairChart(m, w, h) };
   if (k === 'dc') return { t: 'ราย DC แยก AB / CC · ' + BWM[m].t, ...dcBarsChart(m, w, h) };
   if (k === 'trend') return { t: 'รายวัน · ' + BWM[m].t, ...trendChart(m, w, h) };
+  if (!SG()) return chartFor('trend:pct', w, h);
   return { t: 'สัดส่วนเกรดเส้นทาง (% ค่าจ้าง)', ...donutChart(w, h) };
 }
 
@@ -236,7 +238,7 @@ function info169() {
     body += `<g transform="translate(${x} ${y})"><rect width="${cw}" height="${ch}" rx="16" fill="#fff" stroke="#dbe3f0"/><rect x="${cw * .15}" y="-1.2" width="${cw * .7}" height="2.4" fill="#d4af37"/><text x="${cw / 2}" y="31" text-anchor="middle" font-size="19" font-weight="600" fill="#0a2a5e">${esc(c.t)}</text>${c.note && spec !== 'donut' ? `<text x="${cw - pad}" y="31" text-anchor="end" font-size="12.5" fill="#b8334a">${esc(c.note)}</text>` : ''}<g transform="translate(${pad} ${top})">${c.svg}</g></g>`;
     if (c.note && spec === 'donut') notes.push(c.note);
   });
-  const A_ = A(), ftxt = `% ค่าจ้าง = ค่าจ้าง ÷ รายได้ × 100 · KPI ≤ ${fmtN(C.SETTINGS.kpi, 2)}% · ${gradeNote()} · ค่าจ้างที่เป็น 0 ใช้ค่าประมาณการ · วันอาทิตย์คิดใน KPI แต่ไม่แสดงในกราฟรายวัน`;
+  const A_ = A(), ftxt = `% ค่าจ้าง = ค่าจ้าง ÷ รายได้ × 100 · KPI ≤ ${fmtN(C.SETTINGS.kpi, 2)}%${gradeNote() ? ' · ' + gradeNote() : ''} · ค่าจ้างที่เป็น 0 ใช้ค่าประมาณการ · วันอาทิตย์คิดใน KPI แต่ไม่แสดงในกราฟรายวัน`;
   const footSvg = `<rect y="${H - foot}" width="${W}" height="${foot}" fill="#0a2a5e"/><rect y="${H - foot}" width="${W}" height="3" fill="#d4af37"/><text x="${W / 2}" y="${H - foot / 2 + 5}" text-anchor="middle" font-size="14" fill="#dfe8f7">${esc(ftxt)}</text>`;
   return A_.wrap(W, H, A_.sheetHead(W, head, 'h169') + body + footSvg);
 }
@@ -288,7 +290,7 @@ function info169Home() {
     b += panel(m, tc.T ? tc.T.title : '% ค่าจ้างรายวัน', 'ไม่แสดงวันอาทิตย์' + (tc.T && tc.T.note ? ' · ' + tc.T.note : ''), '', '', '', tc.svg ? chartIn(tc.svg, 76) + legendRow(ph - 16) : `<text x="${pw / 2}" y="${ph / 2}" text-anchor="middle" font-size="18" fill="#55657f">ไม่มีข้อมูลรายวัน</text>`);
     b += panel(m + pw + g, '% ค่าจ้าง ราย DC แยก AB / CC', K.pr ? 'ลูกศรเทียบ' + K.pr.l.replace(/\s*\(.*\)/, '') : 'ไม่มีช่วงก่อนหน้า', fmtP(K.A.total.pct), PCOL(K.A.total.pct), K.A.total.trips ? grade(K.A.total.pct) : '', chartIn(dcb, 70));
   }
-  const ftxt = `% ค่าจ้าง = ค่าจ้าง ÷ รายได้ × 100 · KPI ≤ ${fmtN(C.SETTINGS.kpi, 2)}% · ${gradeNote()}` + (byWork ? ' · เข้ารับในสายคิดแบบ' + (NX.CALCS[S.calc] || '') : '') + ' · ผลต่าง: เขียว = ดีขึ้น แดง = แย่ลง' + (K.pr ? ' · เทียบ ' + K.pr.l : '');
+  const ftxt = `% ค่าจ้าง = ค่าจ้าง ÷ รายได้ × 100 · KPI ≤ ${fmtN(C.SETTINGS.kpi, 2)}%${gradeNote() ? ' · ' + gradeNote() : ''}` + (byWork ? ' · เข้ารับในสายคิดแบบ' + (NX.CALCS[S.calc] || '') : '') + ' · ผลต่าง: เขียว = ดีขึ้น แดง = แย่ลง' + (K.pr ? ' · เทียบ ' + K.pr.l : '');
   const footSvg = `<rect y="${H - foot}" width="${W}" height="${foot}" fill="#0a2a5e"/><rect y="${H - foot}" width="${W}" height="3" fill="#d4af37"/><text x="${W / 2}" y="${H - foot / 2 + 5}" text-anchor="middle" font-size="${ftxt.length > 190 ? 12.5 : 14}" fill="#dfe8f7">${esc(ftxt)}</text>`;
   return A_.wrap(W, H, A_.sheetHead(W, head, 'h169h') + b + footSvg);
 }

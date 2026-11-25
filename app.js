@@ -4,6 +4,7 @@
 const C = window.NIMCalc;
 C.SETTINGS.kpi = +DATA.settings.kpi; C.SETTINGS.warnBuffer = +DATA.settings.warnBuffer;
 ['gA', 'gB', 'gC', 'gD', 'gE'].forEach((k, i) => { const v = +DATA.settings[k]; C.SETTINGS[k] = v > 0 ? v : [8, 10, 12, 14, 16][i]; });
+C.SETTINGS.showGrade = DATA.settings.showGrade === undefined || DATA.settings.showGrade === '' ? 1 : (+DATA.settings.showGrade ? 1 : 0);
 const RAW = DATA.rows;
 const D = C.buildDerived(RAW);
 const HAS_DI = D.some(r => r.ty === 'DI');          // มีงานเข้ารับในสายในข้อมูล -> แสดงแถบงาน / วิธีคำนวณ
@@ -41,7 +42,7 @@ const WEEKS = [...new Set(D.filter(r => r.dateObj).map(r => C.weekKeyOf(r.dateOb
 const LAST = DAYS.length ? C.parseThaiDate(DAYS[DAYS.length - 1]) : null;
 const FIRST = DAYS.length ? C.parseThaiDate(DAYS[0]) : null;
 
-const S = { page: 'home', work: 'all', calc: 'prop', group: 'all', mode: 'month', per: MONTHS[MONTHS.length - 1] || 'all', dc: 'all', trip: 'all', route: '', plate: '', q: {}, sort: {}, cmp: 'pct', adim: 'route', am: 'pct', dm: 'pct', vf: 'all', showRoutes: false, open: {}, allAct: false };
+const S = { page: 'home', work: 'all', calc: 'prop', group: 'all', mode: 'month', per: MONTHS[MONTHS.length - 1] || 'all', dc: 'all', trip: 'all', base: 'auto', route: '', plate: '', q: {}, sort: {}, cmp: 'pct', adim: 'route', am: 'pct', dm: 'pct', vf: 'all', showRoutes: false, open: {}, allAct: false };
 
 C.applyCalc(D, S.calc);
 /* ---------- filters (ใช้ getFiltered / rowsForPeriod ของ nim-calc) ---------- */
@@ -67,8 +68,16 @@ function curRange(s = S) {
   let lastWork = e; while (lastWork.getDay() === 0) lastWork = addDays(lastWork, -1);
   return { a, b: LAST < e ? LAST : e, full: LAST >= lastWork, end: e };
 }
+/* ฐานเทียบที่เลือกได้ตามโหมด: auto = แบบเดิม (วัน→วันเดียวกันสัปดาห์ก่อน, สัปดาห์→สัปดาห์ก่อน, เดือน→เดือนก่อน) */
+const BASES = { day: [['auto', 'เทียบสัปดาห์ก่อน (วันเดียวกัน)'], ['day', 'เทียบวันก่อน'], ['month', 'เทียบเดือนก่อน (วันที่เดียวกัน)']], week: [['auto', 'เทียบสัปดาห์ก่อน'], ['month', 'เทียบเดือนก่อน (ช่วงเดียวกัน)']], month: [['auto', 'เทียบเดือนก่อน']] };
+const baseOf = (s = S) => (BASES[s.mode] || []).some(b => b[0] === s.base) ? s.base : 'auto';
+const addMonths = (d, n) => { const t = new Date(d.getFullYear(), d.getMonth() + n, 1), last = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate(); return new Date(t.getFullYear(), t.getMonth(), Math.min(d.getDate(), last)); };
 function prevRange(s = S) {
   const c = curRange(s); if (!c) return null;
+  const base = baseOf(s);
+  if (s.mode === 'day' && base === 'day') { let p = addDays(c.a, -1); if (p.getDay() === 0 && c.a.getDay() !== 0) p = addDays(p, -1); return { a: p, b: p, l: 'วันก่อน (' + dLabel(dtOf(p)) + ')' }; }
+  if (s.mode === 'day' && base === 'month') { const p = addMonths(c.a, -1); return { a: p, b: p, l: 'วันที่เดียวกันของเดือนก่อน (' + dLabel(dtOf(p)) + ')' }; }
+  if (s.mode === 'week' && base === 'month') { const a = addMonths(c.a, -1), b = addMonths(c.b, -1); return { a, b, l: `เดือนก่อนช่วงเดียวกัน (${dShort(a)}–${dShort(b)})` }; }
   if (s.mode === 'day') { const p = addDays(c.a, -7); return { a: p, b: p, l: 'วันเดียวกันของสัปดาห์ก่อน (' + dLabel(dtOf(p)) + ')' }; }
   if (s.mode === 'week') { const a = addDays(c.a, -7), b = addDays(c.b, -7); return { a, b, l: c.full ? 'สัปดาห์ก่อน (' + wLabel(C.weekKeyOf(a)) + ')' : `สัปดาห์ก่อนช่วงเดียวกัน (${dShort(a)}–${dShort(b)})` }; }
   const a = new Date(c.a.getFullYear(), c.a.getMonth() - 1, 1), e = new Date(c.a.getFullYear(), c.a.getMonth(), 0), pm = a.getFullYear() + '-' + String(a.getMonth() + 1).padStart(2, '0');
@@ -86,7 +95,8 @@ function rangeLabel(s = S) {
 const showCalc = () => HAS_DI && S.work !== 'IN';
 const workText = () => !HAS_DI ? '' : (S.work === 'all' ? 'รวม 2 งาน' : WORKS[S.work]) + (showCalc() ? ' · เข้ารับในสายคิดแบบ' + CALCS[S.calc] : '');
 const scopeText = () => [S.dc === 'all' ? 'ทุก DC' : dcName(S.dc), GROUPS[S.group], TRIPS[S.trip], workText()].filter(Boolean).join(' · ');
-const gradeOf = p => C.gradeOf(p);
+const showGrade = () => +C.SETTINGS.showGrade !== 0;
+const gradeOf = p => showGrade() ? C.gradeOf(p) : '';
 const GRC = { A: 'var(--gA)', B: 'var(--gB)', C: 'var(--gC)', D: 'var(--gD)', E: 'var(--gF)', F: 'var(--gF)' };
 
 /* ---------- palette + charts (SVG ล้วน ใช้ทั้งหน้าจอและไฟล์ส่งออก) ---------- */
@@ -187,6 +197,13 @@ function table(id, cols, data, o = {}) {
   return `${search}<div class="tw"><table class="t" id="tb-${id}"><thead><tr>${head}</tr></thead><tbody>${body || `<tr><td colspan="${cols.length}">ไม่มีข้อมูลในเงื่อนไขนี้</td></tr>`}${tot}</tbody></table></div>${more}`;
 }
 const gtag = g => `<span class="gtag ${g}">${g}</span>`;
+/* คอลัมน์เทียบช่วงก่อนหน้า: ผลต่าง % ค่าจ้าง (จุด) ของรายการเดียวกัน */
+function prevAggBy(keyFn, o = {}) { const pr = prevRange(); if (!pr) return null; const m = new Map(); between(pr.a, pr.b, o).forEach(r => { const k = keyFn(r); if (!m.has(k)) m.set(k, []); m.get(k).push(r); }); const out = new Map(); m.forEach((v, k) => out.set(k, C.aggregate(v).total)); return out; }
+function dpCol(P, keyOf, f = x => x.agg.pct) {
+  const dv = x => { const p = P && P.get(keyOf(x)), c = f(x); return p && p.trips && Number.isFinite(c) && Number.isFinite(p.pct) ? c - p.pct : NaN; };
+  return { k: 'dpct', t: 'เทียบก่อน', v: dv, txt: x => { const d = dv(x); return Number.isFinite(d) ? (d > .005 ? '▲ ' : d < -.005 ? '▼ ' : '') + fmtN(Math.abs(d), 2) + ' จุด' : (P ? 'ไม่มีก่อนหน้า' : '–'); }, cls: x => { const d = dv(x); return Number.isFinite(d) ? (d > .005 ? 'd-bad' : d < -.005 ? 'd-good' : '') : 'mut'; } };
+}
+const dpSum = (A, PA) => PA && PA.trips && Number.isFinite(A.pct) && Number.isFinite(PA.pct) ? { t: (A.pct - PA.pct > .005 ? '▲ ' : A.pct - PA.pct < -.005 ? '▼ ' : '') + fmtN(Math.abs(A.pct - PA.pct), 2) + ' จุด', c: A.pct - PA.pct > .005 ? 'd-bad' : A.pct - PA.pct < -.005 ? 'd-good' : '' } : null;
 const pctCol = (k = 'pct', f = x => x.agg.pct) => ({ k, t: '% ค่าจ้าง', v: f, txt: x => fmtP(f(x)), cls: x => 'p-' + pc(f(x)) });
 const aggCols = (f = x => x.agg) => [
   { k: 'trips', t: 'เที่ยว', v: x => f(x).trips, txt: x => fmtN(f(x).trips) },
@@ -197,6 +214,7 @@ const aggCols = (f = x => x.agg) => [
   { k: 'revenue', t: 'รายได้', v: x => f(x).revenue, txt: x => fmtN(f(x).revenue) },
   { k: 'cost', t: 'ค่าจ้าง', v: x => f(x).cost, txt: x => fmtN(f(x).cost) },
   pctCol('pct', x => f(x).pct)];
+function dcSum() { const T = C.aggregate(filt({ dc: 'all' })).total, pr = prevRange(), o = sumOf(T), d = pr ? dpSum(T, C.aggregate(between(pr.a, pr.b, { dc: 'all' })).total) : null; if (d) { o.dpct = d.t; o.cls.dpct = d.c; } return o; }
 const sumOf = a => ({ trips: fmtN(a.trips), points: fmtN(a.points), avgPoints: fmtN(a.avgPoints, 2), bills: fmtN(a.bills), boxes: fmtN(a.boxes), revenue: fmtN(a.revenue), cost: fmtN(a.cost), pct: fmtP(a.pct), cls: { pct: 'p-' + pc(a.pct) } });
 
 /* ---------- groupings ---------- */
@@ -227,7 +245,7 @@ function renderShell() {
   $('#seg-group').innerHTML = seg([['all', 'รวม'], ['AB', 'AB แห้ง'], ['CC', 'CC เย็น']], S.group, 'group');
   $('#seg-mode').innerHTML = seg([['day', 'วัน'], ['week', 'สัปดาห์'], ['month', 'เดือน']], S.mode, 'mode');
   const opt = (v, t, cur) => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(t)}</option>`;
-  $('#filters').innerHTML = `<select id="f-per" aria-label="ช่วงเวลา">${perOptions(S.mode).map(([v, t]) => opt(v, t, S.per)).join('')}</select><select id="f-dc" aria-label="DC">${opt('all', 'ทุก DC', S.dc)}${DCS.map(c => opt(c, dcName(c), S.dc)).join('')}</select><select id="f-trip" aria-label="กลุ่มเข้ารับ">${Object.entries(TRIPS).map(([v, t]) => opt(v, t, S.trip)).join('')}</select>`;
+  $('#filters').innerHTML = `<select id="f-per" aria-label="ช่วงเวลา">${perOptions(S.mode).map(([v, t]) => opt(v, t, S.per)).join('')}</select><select id="f-dc" aria-label="DC">${opt('all', 'ทุก DC', S.dc)}${DCS.map(c => opt(c, dcName(c), S.dc)).join('')}</select><select id="f-trip" aria-label="กลุ่มเข้ารับ">${Object.entries(TRIPS).map(([v, t]) => opt(v, t, S.trip)).join('')}</select>${S.per !== 'all' ? `<select id="f-base" aria-label="เทียบกับ">${(BASES[S.mode] || []).map(([v, t]) => opt(v, t, baseOf())).join('')}</select>` : ''}`;
   const nav = i => PAGES.map(p => `<button data-act="page:${p[0]}"${S.page === p[0] ? ' aria-current="page"' : ''}>${ic(p[0])}<span>${p[i]}</span></button>`).join('');
   $('#tab').innerHTML = nav(2); $('#rail-nav').innerHTML = nav(1);
 }
@@ -367,10 +385,10 @@ function dcBarsH(P, w, live) {
 function trendSpec(P, metric = 'pct') {
   const M = MET[metric];
   if (S.mode === 'week' && S.per !== 'all') {
-    const a = wkDate(S.per), days = [0, 1, 2, 3, 4, 5].map(i => addDays(a, i)), cur = C.dailyAgg(filt()), pr = prevRange(), prv = pr ? C.dailyAgg(between(addDays(a, -7), addDays(a, -1))) : null, key = g => g === 'T' ? 'total' : g;
+    const a = wkDate(S.per), days = [0, 1, 2, 3, 4, 5].map(i => addDays(a, i)), cur = C.dailyAgg(filt()), pr = prevRange(), off = pr ? Math.round((pr.a - a) / 864e5) : -7, prv = pr ? C.dailyAgg(between(addDays(a, off), addDays(a, off + 6))) : null, mon = off < -7, key = g => g === 'T' ? 'total' : g;
     const series = groupsShown().map(g => ({ name: GNAME[g], color: GCOL(P, g === 'T' ? '' : g), w: g === 'T' ? 2.6 : 2, vals: days.map(d => { const o = cur.byDate[dtOf(d)]; return o && o[key(g)].trips ? M.f(o[key(g)]) : NaN; }) }));
-    if (prv) series.push({ name: (S.group === 'all' ? 'รวม' : GNAME[S.group]) + ' สัปดาห์ก่อน', color: P.muted, w: 2, dash: 1, op: .8, vals: days.map(d => { const o = prv.byDate[dtOf(addDays(d, -7))], gk = S.group === 'all' ? 'total' : S.group; return o && o[gk].trips ? M.f(o[gk]) : NaN; }) });
-    return { labels: days.map(d => DOW[d.getDay()] + ' ' + d.getDate() + '/' + (d.getMonth() + 1)), series, tips: days.map(d => dLabel(dtOf(d))), acts: days.map(d => 'day:' + enc(dtOf(d))), mark: -1, title: M.t + ' รายวันในสัปดาห์', note: 'เส้นประเทา = สัปดาห์ก่อนวันเดียวกัน' };
+    if (prv) series.push({ name: (S.group === 'all' ? 'รวม' : GNAME[S.group]) + (mon ? ' เดือนก่อน' : ' สัปดาห์ก่อน'), color: P.muted, w: 2, dash: 1, op: .8, vals: days.map(d => { const o = prv.byDate[dtOf(addDays(d, off))], gk = S.group === 'all' ? 'total' : S.group; return o && o[gk].trips ? M.f(o[gk]) : NaN; }) });
+    return { labels: days.map(d => DOW[d.getDay()] + ' ' + d.getDate() + '/' + (d.getMonth() + 1)), series, tips: days.map(d => dLabel(dtOf(d))), acts: days.map(d => 'day:' + enc(dtOf(d))), mark: -1, title: M.t + ' รายวันในสัปดาห์', note: mon ? 'เส้นประเทา = เดือนก่อนช่วงเดียวกัน' : 'เส้นประเทา = สัปดาห์ก่อนวันเดียวกัน' };
   }
   const Sx = dailySeries(trendRows(), metric, P), day = S.mode === 'day' && S.per !== 'all';
   return { ...Sx, mark: day ? Sx.dates.indexOf(S.per) : -1, markLabel: day, title: day ? M.t + ' 14 วันล่าสุด' : M.t + ' รายวัน', note: day ? 'จุดทอง = วันที่เลือก' : '' };
@@ -394,8 +412,8 @@ function dcDetail() {
   if (S.dc === 'all' || S.page !== 'home') return '';
   const rows = filt(), R = routeAgg(rows), V = vehAgg(rows), P = pal(), A = C.aggregate(rows), w = W3();
   return `<div class="grid3" id="zone-detail">
-  <section class="card"><h2>เส้นทางใน ${esc(dcName(S.dc))}</h2><p class="note">${fmtN(R.length)} เส้นทาง · AB ${fmtP(A.AB.pct)} · CC ${fmtP(A.CC.pct)} · กดเพื่อดูรายวัน</p>${table('zr', [{ k: 'name', t: 'เส้นทาง', v: x => x.name, dir: 'text' }, { k: 'g', t: 'กลุ่ม', v: x => x.g, dir: 'text', html: x => x.g.split('/').map(gtag).join(' ') }, { k: 'trips', t: 'เที่ยว', v: x => x.agg.trips, txt: x => fmtN(x.agg.trips) }, pctCol()], R, { act: x => 'route:' + enc(x.key), sort: { k: 'pct', d: 1 }, limit: 12 })}</section>
-  <section class="card"><h2>ทะเบียนรถใน DC นี้</h2><p class="note">${fmtN(V.length)} คัน · ผิดปกติ ${fmtN(V.filter(v => v.anomaly).length)} คัน · กดเพื่อดูรายวัน</p>${table('zv', [{ k: 'pl', t: 'ทะเบียน', v: x => x.pl, dir: 'text', html: x => esc(x.pl) + (x.anomaly ? ' <span class="tag">ผิดปกติ</span>' : '') }, { k: 'g', t: 'กลุ่ม', v: x => x.g, dir: 'text', html: x => gtag(x.g) }, { k: 'cpt', t: 'ค่าจ้าง/เที่ยว', v: x => x.costPerTrip, txt: x => fmtN(x.costPerTrip) }, pctCol()], V, { act: x => 'car:' + enc(x.pl), sort: { k: 'pct', d: 1 }, limit: 12 })}</section>
+  <section class="card"><h2>เส้นทางใน ${esc(dcName(S.dc))}</h2><p class="note">${fmtN(R.length)} เส้นทาง · AB ${fmtP(A.AB.pct)} · CC ${fmtP(A.CC.pct)} · กดเพื่อดูรายวัน</p>${table('zr', [{ k: 'name', t: 'เส้นทาง', v: x => x.name, dir: 'text' }, { k: 'g', t: 'กลุ่ม', v: x => x.g, dir: 'text', html: x => x.g.split('/').map(gtag).join(' ') }, { k: 'trips', t: 'เที่ยว', v: x => x.agg.trips, txt: x => fmtN(x.agg.trips) }, pctCol(), dpCol(prevAggBy(routeKey), x => x.key)], R, { act: x => 'route:' + enc(x.key), sort: { k: 'pct', d: 1 }, limit: 12 })}</section>
+  <section class="card"><h2>ทะเบียนรถใน DC นี้</h2><p class="note">${fmtN(V.length)} คัน · ผิดปกติ ${fmtN(V.filter(v => v.anomaly).length)} คัน · กดเพื่อดูรายวัน</p>${table('zv', [{ k: 'pl', t: 'ทะเบียน', v: x => x.pl, dir: 'text', html: x => esc(x.pl) + (x.anomaly ? ' <span class="tag">ผิดปกติ</span>' : '') }, { k: 'g', t: 'กลุ่ม', v: x => x.g, dir: 'text', html: x => gtag(x.g) }, { k: 'cpt', t: 'ค่าจ้าง/เที่ยว', v: x => x.costPerTrip, txt: x => fmtN(x.costPerTrip) }, pctCol(), dpCol(prevAggBy(r => r.pl), x => x.pl)], V, { act: x => 'car:' + enc(x.pl), sort: { k: 'pct', d: 1 }, limit: 12 })}</section>
   <section class="card"><h2>% ค่าจ้างรายวันของ DC</h2><p class="note">ไม่แสดงวันอาทิตย์ · กดจุดเพื่อดูรายวัน</p><div class="chart">${trendSvg(P, w, 'pct', trendRows(), Math.round(Math.max(220, w * .62)))}</div>${legendGroups(P)}</section></div>`;
 }
 const CMP = ['pct', 'revenue', 'cost', 'trips', 'points', 'avgPoints'];
@@ -429,7 +447,7 @@ function workPanel(t, K, P, w) {
   const tag = t === 'IN' ? 'ค่าจ้างจริง ÷ รายได้' : S.calc === 'prop' ? 'สัดส่วนจริง: ค่าจ้างคำนวณ ÷ รายได้ค่าขนส่งเข้ารับ' : 'ปกติ: ค่าจ้างจริง ÷ รายได้ค่าขนส่งเข้ารับ';
   const gl = gg => A[gg].trips ? `<p><i class="gtag ${gg}">${gg}</i> รายได้ ${fmtN(A[gg].revenue)} · ค่าจ้าง ${fmtN(A[gg].cost)} <b class="t-${pc(A[gg].pct)}">${fmtP(A[gg].pct)}</b></p>` : `<p><i class="gtag ${gg}">${gg}</i> <span class="mut">ไม่มีงานในช่วงนี้</span></p>`;
   const tr = trendRows().filter(r => r.ty === t);
-  return `<section class="card wp" style="--wc:${WCOL[t]}"><button class="wp-h" data-act="work:${t}" aria-label="ดูเฉพาะ${WORKS[t]}"><span><b>${WORKS[t]}</b><small>${esc(tag)}</small></span><span class="wp-k"><b class="t-${pc(T.pct)}">${fmtP(T.pct)}</b>${T.trips ? `<i class="grd" style="background:${GRC[g] || 'var(--muted)'}">เกรด ${g}</i>` : ''}</span></button>
+  return `<section class="card wp" style="--wc:${WCOL[t]}"><button class="wp-h" data-act="work:${t}" aria-label="ดูเฉพาะ${WORKS[t]}"><span><b>${WORKS[t]}</b><small>${esc(tag)}</small></span><span class="wp-k"><b class="t-${pc(T.pct)}">${fmtP(T.pct)}</b>${T.trips && g ? `<i class="grd" style="background:${GRC[g] || 'var(--muted)'}">เกรด ${g}</i>` : ''}</span></button>
   ${T.trips ? `<div class="wp-m"><div><b>${fmtN(T.revenue)}</b><span>รายได้</span></div><div><b>${fmtN(T.cost)}</b><span>ค่าจ้าง</span></div><div><b>${fmtN(T.trips)}</b><span>เที่ยว</span></div><div><b>${fmtN(T.points)}</b><span>จุด</span></div><div><b>${fmtN(T.avgPoints, 2)}</b><span>จุด/เที่ยว</span></div><div><b>${fmtN(T.trips ? T.cost / T.trips : 0)}</b><span>ค่าจ้าง/เที่ยว</span></div></div>
   ${all ? `<div class="wp-g">${gl('AB')}${gl('CC')}</div>` : ''}
   <h3>% ค่าจ้างต่อรายได้ รายวัน</h3><div class="chart">${trendSvg(P, w, 'pct', tr, Math.round(Math.max(210, Math.min(280, w * .42))))}</div>${legendGroups(P)}` : '<p class="note">ไม่มีงานในเงื่อนไขนี้</p>'}</section>`;
@@ -437,9 +455,11 @@ function workPanel(t, K, P, w) {
 function dcWorkTable() {
   const rows = filt({ dc: 'all' }), ag = (x, t) => C.aggregate(t ? x.filter(r => r.ty === t) : x).total;
   const cells = a => `<td class="bl">${a.trips ? fmtN(a.revenue) : '–'}</td><td>${a.trips ? fmtN(a.cost) : '–'}</td><td class="p-${pc(a.pct)}">${a.trips ? fmtP(a.pct) : '–'}</td>`;
-  const row = (name, x, act, cls = '') => `<tr class="${cls}"${act ? ` data-act="${act}"` : ''}><td>${esc(name)}</td>${cells(ag(x, 'IN'))}${cells(ag(x, 'DI'))}${cells(ag(x))}</tr>`;
-  const head = `<tr><th rowspan="2">DC</th><th colspan="3" class="gh">เข้ารับอย่างเดียว</th><th colspan="3" class="gh">เข้ารับในสาย</th><th colspan="3" class="gh">รวม</th></tr><tr>${'<th class="bl">รายได้</th><th>ค่าจ้าง</th><th>%</th>'.repeat(3)}</tr>`;
-  return `<section class="card"><h2>ผลราย DC แยกตามงาน</h2><p class="note">กด DC เพื่อกรองทั้งหน้าและเปิดเส้นทาง ทะเบียนรถ และรายวัน กดซ้ำเพื่อปิด</p><div class="tw"><table class="t wt"><thead>${head}</thead><tbody>${DCS.map(dc => row(dcName(dc), rows.filter(r => r.dc === dc), 'dc:' + (dc === S.dc ? 'all' : dc), dc === S.dc ? 'sel' : '')).join('')}${row('รวม', rows, '', 'sum')}</tbody></table></div></section>`;
+  const pr = prevRange(), prow = pr ? between(pr.a, pr.b, { dc: 'all' }) : null;
+  const dcell = (x, px) => { if (!prow) return ''; const d = dpSum(ag(x), ag(px)); return d ? `<td class="${d.c}">${d.t}</td>` : '<td class="mut">–</td>'; };
+  const row = (name, x, act, cls = '', px = []) => `<tr class="${cls}"${act ? ` data-act="${act}"` : ''}><td>${esc(name)}</td>${cells(ag(x, 'IN'))}${cells(ag(x, 'DI'))}${cells(ag(x))}${dcell(x, px)}</tr>`;
+  const head = `<tr><th rowspan="2">DC</th><th colspan="3" class="gh">เข้ารับอย่างเดียว</th><th colspan="3" class="gh">เข้ารับในสาย</th><th colspan="3" class="gh">รวม</th>${prow ? '<th rowspan="2" class="bl">เทียบก่อน<br><small>% รวม</small></th>' : ''}</tr><tr>${'<th class="bl">รายได้</th><th>ค่าจ้าง</th><th>%</th>'.repeat(3)}</tr>`;
+  return `<section class="card"><h2>ผลราย DC แยกตามงาน</h2><p class="note">กด DC เพื่อกรองทั้งหน้าและเปิดเส้นทาง ทะเบียนรถ และรายวัน กดซ้ำเพื่อปิด</p><div class="tw"><table class="t wt"><thead>${head}</thead><tbody>${DCS.map(dc => row(dcName(dc), rows.filter(r => r.dc === dc), 'dc:' + (dc === S.dc ? 'all' : dc), dc === S.dc ? 'sel' : '', prow ? prow.filter(r => r.dc === dc) : [])).join('')}${row('รวม', rows, '', 'sum', prow || [])}</tbody></table></div></section>`;
 }
 VIEW.home = () => {
   if (HAS_DI && S.work === 'all') {
@@ -462,7 +482,7 @@ function homeOne() {
   <section class="card"><h2>สัดส่วนค่าจ้าง AB / CC</h2><p class="note">ค่าจ้างรวม ${fmtN(T.cost)} บาท</p><div class="chart" style="max-width:230px;margin:auto">${donut({ parts, center: fmtP(T.pct), sub: 'ค่าจ้าง ÷ รายได้', P })}</div>
   <div class="tw" style="margin-top:8px"><table class="t"><thead><tr><th>กลุ่ม</th><th>รายได้</th><th>ค่าจ้าง</th><th>%</th></tr></thead><tbody>${parts.map(p => `<tr data-act="group:${p.g}"><td><i style="display:inline-block;width:10px;height:10px;border-radius:3px;background:${p.c};margin-right:6px"></i>${esc(p.l)}</td><td>${fmtN(K.A[p.g].revenue)}</td><td>${fmtN(K.A[p.g].cost)}</td><td class="p-${pc(K.A[p.g].pct)}">${fmtP(K.A[p.g].pct)}</td></tr>`).join('')}</tbody></table></div></section></div>
   ${isDay ? `<section class="card"><h2>${esc(tc.T.title)}</h2><p class="note">เส้นประแดง = KPI ${fmtN(C.SETTINGS.kpi, 2)}% · ไม่แสดงวันอาทิตย์ · จุดทอง = วันที่เลือก · กดจุดเพื่อดูรายวัน</p><div class="chart">${tc.svg || '<p class="note">ไม่มีข้อมูลรายวันในเงื่อนไขนี้</p>'}</div>${legendGroups(P)}</section>` : ''}
-  <section class="card"><h2>ผลราย DC</h2><p class="note">กด DC เพื่อกรองทั้งหน้าและเปิดเส้นทาง ทะเบียนรถ และรายวัน กดซ้ำเพื่อปิด</p>${table('dc', DCCOLS(), dcs, { act: x => 'dc:' + (x.dc === S.dc ? 'all' : x.dc), sel: x => x.dc === S.dc, sort: { k: 'name', d: 1 }, sum: sumOf(C.aggregate(filt({ dc: 'all' })).total) })}</section>
+  <section class="card"><h2>ผลราย DC</h2><p class="note">กด DC เพื่อกรองทั้งหน้าและเปิดเส้นทาง ทะเบียนรถ และรายวัน กดซ้ำเพื่อปิด</p>${table('dc', [...DCCOLS(), dpCol(prevAggBy(r => r.dc, { dc: 'all' }), x => x.dc)], dcs, { act: x => 'dc:' + (x.dc === S.dc ? 'all' : x.dc), sel: x => x.dc === S.dc, sort: { k: 'name', d: 1 }, sum: dcSum() })}</section>
   ${dcDetail()}
   <section class="card"><h2>เทียบรายเดือนตาม DC</h2><div class="tools" style="justify-content:center"><select id="f-cmp" aria-label="ตัวชี้วัดที่เทียบ">${CMP.map(k => `<option value="${k}"${k === S.cmp ? ' selected' : ''}>${esc(MET[k].t)}</option>`).join('')}</select></div><p class="note">${esc(GROUPS[S.group])}${ct.n > 1 && ct.pr ? ' · เปลี่ยน = เดือนล่าสุดเทียบ ' + esc(ct.pr.l) : ''}</p>${ct.html}</section>`;
 }
@@ -497,7 +517,7 @@ VIEW.dc = () => {
   <section class="card"><h2>ผลราย DC → กลุ่ม → เส้นทาง</h2><p class="note">กด DC เพื่อขยาย · กดเส้นทางเพื่อดูรายวันและทะเบียนรถ · ${fmtN(R.length)} เส้นทาง</p>
   <div class="tools"><input type="search" id="q-dd" data-q="dd" placeholder="ค้นหาเส้นทาง ทะเบียน หรือ DC" aria-label="ค้นหาเส้นทาง ทะเบียน หรือ DC" value="${esc(S.q.dd || '')}"><div class="seg2" role="group" aria-label="ระดับรายละเอียด"><button data-act="routes:0" aria-pressed="${!S.showRoutes}">DC + กลุ่ม</button><button data-act="routes:1" aria-pressed="${S.showRoutes}">ถึงเส้นทาง</button></div><button class="btn alt" data-act="ddall" style="min-height:38px;padding:6px 12px">ขยาย/ยุบทั้งหมด</button></div>
   <div class="tw"><table class="t" id="tb-dd"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div></section>
-  <section class="card"><h2>เส้นทางทั้งหมด</h2><p class="note">ทุกเส้นทางแสดง DC และกลุ่ม · เรียงจาก % ค่าจ้างสูงไปต่ำ</p>${table('rt', [{ k: 'name', t: 'เส้นทาง', v: x => x.name, dir: 'text' }, { k: 'dc', t: 'DC', v: x => dcName(x.dc), dir: 'text' }, { k: 'g', t: 'กลุ่ม', v: x => x.g, dir: 'text', html: x => x.g.split('/').map(gtag).join(' ') }, { k: 'cars', t: 'คัน', v: x => x.cars, txt: x => fmtN(x.cars) }, ...aggCols(), { k: 'excess', t: 'ส่วนเกิน KPI', v: x => x.excess, txt: x => x.excess > 0 ? fmtN(x.excess) : '–' }], R, { act: x => 'route:' + enc(x.key), sort: { k: 'pct', d: 1 }, search: 'ค้นหาเส้นทาง', limit: 50 })}</section>`;
+  <section class="card"><h2>เส้นทางทั้งหมด</h2><p class="note">ทุกเส้นทางแสดง DC และกลุ่ม · เรียงจาก % ค่าจ้างสูงไปต่ำ</p>${table('rt', [{ k: 'name', t: 'เส้นทาง', v: x => x.name, dir: 'text' }, { k: 'dc', t: 'DC', v: x => dcName(x.dc), dir: 'text' }, { k: 'g', t: 'กลุ่ม', v: x => x.g, dir: 'text', html: x => x.g.split('/').map(gtag).join(' ') }, { k: 'cars', t: 'คัน', v: x => x.cars, txt: x => fmtN(x.cars) }, ...aggCols(), dpCol(prevAggBy(routeKey), x => x.key), { k: 'excess', t: 'ส่วนเกิน KPI', v: x => x.excess, txt: x => x.excess > 0 ? fmtN(x.excess) : '–' }], R, { act: x => 'route:' + enc(x.key), sort: { k: 'pct', d: 1 }, search: 'ค้นหาเส้นทาง', limit: 50 })}</section>`;
 };
 
 /* ทะเบียนรถ */
@@ -509,7 +529,7 @@ VIEW.car = () => {
     { k: 'cpt', t: 'ค่าจ้าง/เที่ยว', v: x => x.costPerTrip, txt: x => fmtN(x.costPerTrip), cls: x => x.anomaly ? 'p-bad' : '' }, { k: 'med', t: 'มัธยฐาน DC+กลุ่ม', v: x => x.medianCostPerTrip, txt: x => fmtN(x.medianCostPerTrip) }, { k: 'st', t: 'สถานะ', v: x => x.anomaly ? 1 : 0, html: x => x.anomaly ? '<span class="tag">ผิดปกติ</span>' : '<span class="tag mut">ปกติ</span>' }];
   return `${header('ทะเบียนรถ', esc(rangeLabel()) + ' · ' + esc(scopeText()))}
   <section class="card"><h2>ผลรายทะเบียน</h2><p class="note">ผิดปกติ = ตั้งแต่ 2 เที่ยว และค่าจ้างต่อเที่ยวเกิน 1.5 เท่าของมัธยฐาน DC+กลุ่ม · ${fmtN(an)} คันผิดปกติ · กดแถวเพื่อดูรายวัน</p>
-  ${table('veh', cols, V, { act: x => 'car:' + enc(x.pl), sel: x => x.pl === S.plate, sort: { k: 'pct', d: 1 }, search: 'ค้นหาทะเบียนหรือเส้นทาง', qx: x => Object.keys(x.routeMap).join(' '), tools: `<div class="seg2" role="group" aria-label="สถานะ"><button data-act="vf:all" aria-pressed="${S.vf === 'all'}">ทั้งหมด</button><button data-act="vf:anomaly" aria-pressed="${S.vf === 'anomaly'}">ผิดปกติ ${fmtN(an)}</button></div>`, limit: 60 })}</section>`;
+  ${table('veh', [...cols, dpCol(prevAggBy(r => r.pl), x => x.pl)], V, { act: x => 'car:' + enc(x.pl), sel: x => x.pl === S.plate, sort: { k: 'pct', d: 1 }, search: 'ค้นหาทะเบียนหรือเส้นทาง', qx: x => Object.keys(x.routeMap).join(' '), tools: `<div class="seg2" role="group" aria-label="สถานะ"><button data-act="vf:all" aria-pressed="${S.vf === 'all'}">ทั้งหมด</button><button data-act="vf:anomaly" aria-pressed="${S.vf === 'anomaly'}">ผิดปกติ ${fmtN(an)}</button></div>`, limit: 60 })}</section>`;
 };
 
 /* รายวัน */
@@ -658,7 +678,7 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('change', e => {
   const t = e.target, id = t.id;
-  if (id === 'f-per') S.per = t.value; else if (id === 'f-dc') { S.dc = t.value; if (S.dc !== 'all' && S.page === 'home') goDetail = true; } else if (id === 'f-trip') S.trip = t.value; else if (id === 'f-cmp') S.cmp = t.value; else if (id === 'f-am') S.am = t.value; else return;
+  if (id === 'f-per') S.per = t.value; else if (id === 'f-dc') { S.dc = t.value; if (S.dc !== 'all' && S.page === 'home') goDetail = true; } else if (id === 'f-trip') S.trip = t.value; else if (id === 'f-base') S.base = t.value; else if (id === 'f-cmp') S.cmp = t.value; else if (id === 'f-am') S.am = t.value; else return;
   render(true);
   if (goDetail) { goDetail = false; const d = $('#zone-detail'); if (d) d.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
 });
@@ -676,5 +696,5 @@ document.getElementById('ov').addEventListener('click', e => { if (e.target.id =
 let rt, lastW = innerWidth; addEventListener('resize', () => { if (innerWidth === lastW) return; lastW = innerWidth; clearTimeout(rt); rt = setTimeout(() => render(true), 200); });
 matchMedia('(prefers-color-scheme:dark)').addEventListener('change', () => render(true));
 
-window.NX = { trendRows, HAS_DI, WORKS, CALCS, workText, gradeOf, statData, UNIT, emptyNote, dcGroupData, dcBars, dcBarsH, trendSpec, trendChart, shortDc, wkDate, addDays, dtOf, S, D, RAW, C, filt, between, kpiData, extraStats, prevRange, curRange, rangeLabel, scopeText, dcAgg, routeAgg, vehAgg, cmpRows, analysisRows, execBullets, dailySeries, splitParts, lineChart, hbars, donut, trendSvg, LIGHT, MET, AMET, ADIM, GROUPS, TRIPS, GNAME, GCOL, esc, fmtN, fmtP, fmtK, mLabel, dLabel, dcName, DCS, MONTHS, DAYS, LAST, render, openSheet, closeSheet, VIEW, table, header, pc, excessOf, dataNote };
+window.NX = { BASES, baseOf, addMonths, showGrade, prevAggBy, trendRows, HAS_DI, WORKS, CALCS, workText, gradeOf, statData, UNIT, emptyNote, dcGroupData, dcBars, dcBarsH, trendSpec, trendChart, shortDc, wkDate, addDays, dtOf, S, D, RAW, C, filt, between, kpiData, extraStats, prevRange, curRange, rangeLabel, scopeText, dcAgg, routeAgg, vehAgg, cmpRows, analysisRows, execBullets, dailySeries, splitParts, lineChart, hbars, donut, trendSvg, LIGHT, MET, AMET, ADIM, GROUPS, TRIPS, GNAME, GCOL, esc, fmtN, fmtP, fmtK, mLabel, dLabel, dcName, DCS, MONTHS, DAYS, LAST, render, openSheet, closeSheet, VIEW, table, header, pc, excessOf, dataNote };
 render();
